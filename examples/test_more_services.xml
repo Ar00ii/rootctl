@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<nmaprun scanner="nmap" args="nmap -sCV -p- -oX scan.xml 10.10.11.51" version="7.94">
+  <host>
+    <status state="up"/>
+    <address addr="10.10.11.51" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="25"><state state="open"/><service name="smtp" product="Postfix smtpd"/></port>
+      <port protocol="udp" portid="161"><state state="open"/><service name="snmp" product="Net-SNMP" version="5.9"/></port>
+      <port protocol="tcp" portid="8080"><state state="open"/><service name="http" product="Apache Tomcat" version="9.0.50"/></port>
+      <port protocol="tcp" portid="8081"><state state="open"/><service name="http" product="Jetty" version="10.0.7" extrainfo="Jenkins/2.319"/></port>
+    </ports>
+  </host>
+  <runstats><finished time="0" exit="success"/></runstats>
+</nmaprun>

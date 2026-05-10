@@ -1,0 +1,32 @@
+chain_id: login_form_brute_force
+title: "Web login form — hydra brute force with F= signature"
+severity: MEDIUM
+tags: [web, brute-force, hydra, login]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/(login|signin|sign-in|admin)(\\.|$|/)" }
+    - { path_in: ["/login.php", "/admin", "/admin.php", "/login", "/signin"] }
+
+description: |
+  Login form discovered. The trick to brute-force a web form with hydra is to
+  identify the exact failure string the page returns and feed it as the
+  `F=` signature in the http-post-form module.
+
+steps:
+  - id: 1
+    title: "Identify the failure string in the HTML"
+    notes: |
+      Open the login page, submit fake credentials, and copy the exact text
+      shown on failure (e.g. 'Invalid username' or 'incorrect').
+
+  - id: 2
+    title: "Launch hydra using that string as F="
+    command: hydra -l USUARIO -P /usr/share/wordlists/rockyou.txt $VICTIMA http-post-form '/login.php:user=^USER^&pass=^PASS^:F=incorrect'
+    notes: |
+      Replace the field names (`user`, `pass`) with whatever the form
+      actually posts (check Network → Request payload in DevTools).
+      Replace `incorrect` with the exact failure substring from step 1.
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/login-bypass

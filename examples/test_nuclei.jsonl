@@ -1,0 +1,4 @@
+{"template-id":"tech-detect","info":{"name":"WordPress Detected","severity":"info","tags":["tech","wordpress"]},"matched-at":"http://10.10.11.99/","type":"http","host":"10.10.11.99"}
+{"template-id":"CVE-2021-44228","info":{"name":"Apache Log4j RCE","severity":"critical","tags":["cve","rce","log4j"]},"matched-at":"http://10.10.11.99:8080/api","type":"http","host":"10.10.11.99"}
+{"template-id":"exposed-panel","info":{"name":"phpMyAdmin Panel","severity":"info","tags":["panel","phpmyadmin"]},"matched-at":"http://10.10.11.99/phpmyadmin/","type":"http","host":"10.10.11.99"}
+{"template-id":"git-config","info":{"name":"Git Config Exposure","severity":"medium","tags":["exposure","git"]},"matched-at":"http://10.10.11.99/.git/config","type":"http","host":"10.10.11.99"}

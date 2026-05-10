@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" args="nmap -sCV -p- -oX scan.xml 10.10.11.50" version="7.94">
+  <host>
+    <status state="up"/>
+    <address addr="10.10.11.50" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="53"><state state="open"/><service name="domain" product="ISC BIND" version="9.18"/></port>
+      <port protocol="tcp" portid="389"><state state="open"/><service name="ldap" product="OpenLDAP"/></port>
+      <port protocol="tcp" portid="1433"><state state="open"/><service name="ms-sql-s" product="Microsoft SQL Server" version="2019"/></port>
+      <port protocol="tcp" portid="6379"><state state="open"/><service name="redis" product="Redis key-value store" version="6.0.16"/></port>
+    </ports>
+  </host>
+  <runstats><finished time="0" exit="success"/></runstats>
+</nmaprun>

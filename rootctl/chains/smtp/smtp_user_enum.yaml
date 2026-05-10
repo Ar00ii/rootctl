@@ -1,0 +1,37 @@
+chain_id: smtp_user_enum
+title: "SMTP — VRFY / EXPN / RCPT username enumeration"
+severity: LOW
+tags: [smtp, recon, user-enum]
+
+trigger:
+  any_of:
+    - { port: 25 }
+    - { port: 465 }
+    - { port: 587 }
+    - { service: smtp }
+    - { service_pattern: "(?i)smtp" }
+
+description: |
+  Some SMTP servers leak which usernames exist on the box via VRFY,
+  EXPN, or RCPT TO responses. Free input for downstream chains
+  (ssh_brute_force, user_list_to_attacks).
+
+steps:
+  - id: 1
+    title: "Probe with smtp-user-enum (VRFY)"
+    command: smtp-user-enum -M VRFY -U /usr/share/wordlists/seclists/Usernames/Names/names.txt -t $VICTIMA
+
+  - id: 2
+    title: "Manual sanity check via netcat — confirm which mode the server allows"
+    command: |
+      nc $VICTIMA 25
+      VRFY root
+      EXPN root
+      RCPT TO:<root@localhost>
+
+  - id: 3
+    title: "If only RCPT works (most common today)"
+    command: smtp-user-enum -M RCPT -U /usr/share/wordlists/seclists/Usernames/Names/names.txt -t $VICTIMA -D $DOMAIN
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-smtp

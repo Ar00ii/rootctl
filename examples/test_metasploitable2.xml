@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<nmaprun scanner="nmap" args="nmap -sCV -p- -oX scan.xml 10.0.2.4" start="1714920000" startstr="Mon May 5 14:40:00 2026" version="7.94" xmloutputversion="1.05">
+  <scaninfo type="connect" protocol="tcp" numservices="65535" services="1-65535"/>
+  <verbose level="0"/>
+  <debugging level="0"/>
+  <host starttime="1714920000" endtime="1714920400">
+    <status state="up" reason="syn-ack" reason_ttl="63"/>
+    <address addr="10.0.2.4" addrtype="ipv4"/>
+    <hostnames>
+      <hostname name="metasploitable.localdomain" type="user"/>
+    </hostnames>
+    <ports>
+      <port protocol="tcp" portid="21">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="ftp" product="vsftpd" version="2.3.4" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="22">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="ssh" product="OpenSSH" version="4.7p1 Debian 8ubuntu1" extrainfo="protocol 2.0" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="23">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="telnet" product="Linux telnetd" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="25">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="smtp" product="Postfix smtpd" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="53">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="domain" product="ISC BIND" version="9.4.2" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="80">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="http" product="Apache httpd" version="2.2.8" extrainfo="(Ubuntu) DAV/2" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="111">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="rpcbind" product="rpcbind" version="2" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="139">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="netbios-ssn" product="Samba smbd" version="3.X - 4.X" extrainfo="workgroup: WORKGROUP" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="445">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="microsoft-ds" product="Samba smbd" version="3.0.20-Debian" extrainfo="workgroup: WORKGROUP" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="512">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="exec" product="netkit-rsh rexecd" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="513">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="login" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="514">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="shell" product="Netkit rshd" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="1099">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="java-rmi" product="GNU Classpath grmiregistry" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="1524">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="bindshell" product="Metasploitable root shell" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="2049">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="nfs" version="2-4" extrainfo="RPC #100003" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="2121">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="ftp" product="ProFTPD" version="1.3.1" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="3306">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="mysql" product="MySQL" version="5.0.51a-3ubuntu5" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="3632">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="distccd" product="distccd" version="v1" extrainfo="(GNU) 4.2.4 (Ubuntu 4.2.4-1ubuntu4)" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="5432">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="postgresql" product="PostgreSQL DB" version="8.3.0 - 8.3.7" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="5900">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="vnc" product="VNC" extrainfo="protocol 3.3" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="6000">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="X11" extrainfo="access denied" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="6667">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="irc" product="UnrealIRCd" version="3.2.8.1" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="8009">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="ajp13" product="Apache Jserv" version="Protocol v1.3" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="8180">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="http" product="Apache Tomcat/Coyote JSP engine" version="1.1" method="probed" conf="10"/>
+      </port>
+    </ports>
+  </host>
+  <runstats>
+    <finished time="1714920400" timestr="Mon May 5 14:46:40 2026" elapsed="400.13" summary="Nmap done; 1 IP address (1 host up) scanned in 400.13 seconds" exit="success"/>
+    <hosts up="1" down="0" total="1"/>
+  </runstats>
+</nmaprun>

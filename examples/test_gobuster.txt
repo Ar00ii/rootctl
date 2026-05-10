@@ -1,0 +1,27 @@
+===============================================================
+Gobuster v3.6
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://10.10.11.99:80
+[+] Method:                  GET
+[+] Threads:                 10
+[+] Wordlist:                /usr/share/wordlists/dirb/common.txt
+[+] Negative Status codes:   404
+[+] User Agent:              gobuster/3.6
+[+] Timeout:                 10s
+===============================================================
+2026/04/29 12:00:00 Starting gobuster in directory enumeration mode
+===============================================================
+/.htaccess            (Status: 403) [Size: 277]
+/.htpasswd            (Status: 403) [Size: 277]
+/admin                (Status: 301) [Size: 312] [--> http://10.10.11.99/admin/]
+/index.php            (Status: 200) [Size: 4321]
+/login.php            (Status: 200) [Size: 1234]
+/uploads              (Status: 301) [Size: 314] [--> http://10.10.11.99/uploads/]
+/wp-admin             (Status: 301) [Size: 315] [--> http://10.10.11.99/wp-admin/]
+/wp-content           (Status: 301) [Size: 317]
+/wp-login.php         (Status: 200) [Size: 5678]
+/xmlrpc.php           (Status: 405) [Size: 42]
+===============================================================
+2026/04/29 12:01:00 Finished
+===============================================================

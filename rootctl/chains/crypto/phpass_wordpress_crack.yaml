@@ -1,0 +1,30 @@
+chain_id: phpass_wordpress_crack
+title: "Crack phpass (WordPress) hashes with john"
+severity: HIGH
+tags: [crypto, phpass, wordpress, john]
+
+trigger:
+  any_of:
+    - { kind: phpass }
+    - { kind: "phpass-h" }
+
+description: |
+  WordPress-style phpass hash (starts with $P$ or $H$). Obtained by dumping
+  the wp_users table via SQLi or after reading the DB with mysql -p. The
+  file must contain the username next to the hash, separated by `:`.
+
+steps:
+  - id: 1
+    title: "Save the hash with its username"
+    command: echo 'usuario:$P$BlR.....' > wp.hash
+
+  - id: 2
+    title: "Crack it"
+    command: john --wordlist=/usr/share/wordlists/rockyou.txt wp.hash
+
+  - id: 3
+    title: "Show the result"
+    command: john --show wp.hash
+
+references:
+  - https://www.openwall.com/phpass/

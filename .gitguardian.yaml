@@ -1,0 +1,20 @@
+# GitGuardian config — silences false-positive alerts on chain catalog content.
+#
+# Many chains include public reference material (default vendor keys, demo
+# hashes, base64-encoded reverse shells) that trips entropy/secret heuristics
+# even though no secret is leaking from anywhere. List the file paths that
+# are documentation-by-example here.
+
+paths-ignore:
+  - rootctl/chains/**/*.yaml
+  - rootctl/chains/**/*.yml
+  - examples/**
+  - tests/**
+
+matches-ignore:
+  # Telerik UI < 2017.1.118 default validationKey / decryptionKey. Public,
+  # documented in CVE-2017-9248 + the Telerik 2017 security bulletin.
+  - name: telerik-default-validation-key
+    match: B89B2718D5575C53A45A4951B549F50AB7AB3F88AC73D60C6F4C12C49AD86B7F
+  - name: telerik-default-decryption-key
+    match: 3D4A4D58FB7DCFD5C00D80E78EAA1057E72B795EE3B07B73

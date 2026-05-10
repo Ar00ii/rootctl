@@ -1,0 +1,31 @@
+chain_id: etc_shadow_crack
+title: "Crack /etc/shadow hashes with unshadow + john"
+severity: HIGH
+tags: [crypto, shadow, linux, unshadow, john]
+
+trigger:
+  any_of:
+    - { kind: md5crypt }
+    - { kind: sha256crypt }
+    - { kind: sha512crypt }
+
+description: |
+  A Unix crypt(3) hash was detected ($1$, $5$, $6$). Likely from /etc/shadow.
+  Both /etc/passwd and /etc/shadow must already be exfiltrated; combine
+  them with unshadow before feeding to john.
+
+steps:
+  - id: 1
+    title: "Combine passwd and shadow"
+    command: unshadow passwd shadow > combo.txt
+
+  - id: 2
+    title: "Crack with john"
+    command: john --wordlist=/usr/share/wordlists/rockyou.txt combo.txt
+
+  - id: 3
+    title: "Show the result"
+    command: john --show combo.txt
+
+references:
+  - https://www.openwall.com/john/doc/EXAMPLES.shtml

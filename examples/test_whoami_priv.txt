@@ -1,0 +1,13 @@
+PRIVILEGES INFORMATION
+----------------------
+
+Privilege Name                Description                          State
+============================= ==================================== ========
+SeAssignPrimaryTokenPrivilege Replace a process level token        Disabled
+SeIncreaseQuotaPrivilege      Adjust memory quotas for a process   Disabled
+SeAuditPrivilege              Generate security audits             Disabled
+SeChangeNotifyPrivilege       Bypass traverse checking             Enabled
+SeImpersonatePrivilege        Impersonate a client after auth      Enabled
+SeCreateGlobalPrivilege       Create global objects                Enabled
+SeIncreaseWorkingSetPrivilege Increase a process working set       Disabled
+SeBackupPrivilege             Back up files and directories        Enabled

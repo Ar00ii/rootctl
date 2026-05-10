@@ -1,0 +1,27 @@
+  ╔══════════╣ Operating System
+  Linux victim 5.15.0-101-generic #111-Ubuntu SMP
+
+  ╔══════════╣ Useful software
+  /usr/bin/base64
+  /usr/bin/curl
+  /usr/bin/wget
+  /usr/bin/python3
+
+  ╔══════════╣ SUID - Check easy privesc, exploits and write perms
+  ╚ https://book.hacktricks.xyz/linux-hardening/privilege-escalation#sudo-and-suid
+  -rwsr-xr-x 1 root root 71M Jan 30  2024 /usr/bin/find  --->  GTFOBins
+  -rwsr-xr-x 1 root root 90K Mar  2  2023 /usr/bin/su
+  -rwsr-xr-x 1 root root 64K Mar  2  2023 /usr/bin/passwd
+  -rwsr-xr-x 1 root root 12M Feb 10  2024 /usr/bin/nmap  --->  GTFOBins
+  -rwsr-xr-x 1 root root 35K Apr  1  2024 /usr/bin/sudo
+
+  ╔══════════╣ Capabilities
+  /usr/bin/python3.10 = cap_setuid+ep
+  /usr/bin/perl       = cap_setuid+ep
+  /usr/bin/tar        = cap_dac_read_search+ep
+
+  ╔══════════╣ Cron jobs
+  /etc/cron.d/cleanup -rw-r--r--
+
+  ╔══════════╣ Files inside /home
+  -rw-------  1 alice alice 3216 May  6 10:00 /home/alice/.ssh/id_rsa

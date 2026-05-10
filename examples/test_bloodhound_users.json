@@ -1,0 +1,51 @@
+{
+  "data": [
+    {
+      "ObjectIdentifier": "S-1-5-21-1234-1234-1234-1000",
+      "Properties": {
+        "name": "ALICE@HTB.LOCAL",
+        "domain": "HTB.LOCAL",
+        "samaccountname": "alice",
+        "displayname": "Alice Smith",
+        "enabled": true,
+        "asreproastable": true,
+        "kerberoastable": false,
+        "unconstraineddelegation": false,
+        "admincount": 0,
+        "passwordnotreqd": false
+      }
+    },
+    {
+      "ObjectIdentifier": "S-1-5-21-1234-1234-1234-1001",
+      "Properties": {
+        "name": "SVC_SQL@HTB.LOCAL",
+        "domain": "HTB.LOCAL",
+        "samaccountname": "svc_sql",
+        "displayname": "SQL Service Account",
+        "enabled": true,
+        "asreproastable": false,
+        "kerberoastable": true,
+        "unconstraineddelegation": false,
+        "admincount": 0
+      }
+    },
+    {
+      "ObjectIdentifier": "S-1-5-21-1234-1234-1234-1002",
+      "Properties": {
+        "name": "ADMIN_JDOE@HTB.LOCAL",
+        "domain": "HTB.LOCAL",
+        "samaccountname": "admin_jdoe",
+        "enabled": true,
+        "asreproastable": false,
+        "kerberoastable": false,
+        "unconstraineddelegation": true,
+        "admincount": 1
+      }
+    }
+  ],
+  "meta": {
+    "type": "users",
+    "count": 3,
+    "version": 5
+  }
+}

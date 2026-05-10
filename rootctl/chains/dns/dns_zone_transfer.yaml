@@ -1,0 +1,42 @@
+chain_id: dns_zone_transfer
+title: "DNS — attempt zone transfer (AXFR) for full record dump"
+severity: MEDIUM
+tags: [dns, axfr, recon, enumeration]
+
+trigger:
+  any_of:
+    - { port: 53 }
+    - { service: domain }
+    - { service: dns }
+
+description: |
+  Open DNS service. Many internal nameservers leak the entire zone via
+  AXFR to anyone who asks. A successful transfer hands you every host,
+  CNAME, MX, and TXT in the domain — instant subdomain map and often
+  internal hostnames that aren't on public zones.
+
+steps:
+  - id: 1
+    title: "Try AXFR with dig (most reliable)"
+    command: dig axfr @$VICTIMA $DOMAIN
+
+  - id: 2
+    title: "Same with host"
+    command: host -l $DOMAIN $VICTIMA
+
+  - id: 3
+    title: "Reverse-lookup all A records you found"
+    command: |
+      for ip in $(dig axfr @$VICTIMA $DOMAIN | awk '/IN[ \t]+A[ \t]/ {print $5}'); do
+        echo "$ip → $(dig +short -x $ip @$VICTIMA)"
+      done
+
+common_errors:
+  - error: "Transfer failed (REFUSED)"
+    solution: |
+      Server refuses AXFR from external IPs. Try the chaos class subdomains:
+        dig @$VICTIMA -t txt version.bind chaos
+      Or fall back to bruteforce with dnsenum / gobuster dns mode.
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-dns

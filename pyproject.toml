@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rootctl"
+version = "0.1.0"
+description = "Offline CLI that turns raw pentest tool output (nmap, gobuster, nuclei, ffuf, feroxbuster) into prioritized actionable findings, extracts hashes and credentials, and suggests the exact next command."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "rootctl contributors" }]
+keywords = ["pentesting", "security", "ctf", "oscp", "nmap", "kali"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://rootctl.com"
+Repository = "https://github.com/Ar00ii/rootctl"
+Issues = "https://github.com/Ar00ii/rootctl/issues"
+
+[project.scripts]
+rootctl = "rootctl.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rootctl*"]
+exclude = ["tests*", "scripts*", "examples*", "docs*"]
+
+[tool.setuptools.package-data]
+rootctl = ["py.typed", "chains/**/*.yaml", "chains/**/*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

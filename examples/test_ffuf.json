@@ -1,0 +1,10 @@
+{
+  "commandline": "ffuf -u http://10.10.11.99/FUZZ -w /usr/share/wordlists/dirb/common.txt -of json",
+  "time": "2026-04-29T12:00:00",
+  "results": [
+    {"input": {"FUZZ": "admin"}, "position": 0, "status": 301, "length": 312, "words": 20, "lines": 10, "url": "http://10.10.11.99/admin", "host": "10.10.11.99"},
+    {"input": {"FUZZ": "login.php"}, "position": 0, "status": 200, "length": 1234, "words": 100, "lines": 50, "url": "http://10.10.11.99/login.php", "host": "10.10.11.99"},
+    {"input": {"FUZZ": "wp-login.php"}, "position": 0, "status": 200, "length": 5678, "words": 200, "lines": 80, "url": "http://10.10.11.99/wp-login.php", "host": "10.10.11.99"},
+    {"input": {"FUZZ": "uploads"}, "position": 0, "status": 301, "length": 314, "words": 20, "lines": 10, "url": "http://10.10.11.99/uploads", "host": "10.10.11.99"}
+  ]
+}

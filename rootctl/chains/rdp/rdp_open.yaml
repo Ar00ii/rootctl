@@ -1,0 +1,22 @@
+chain_id: rdp_open
+title: "RDP — interactive login with xfreerdp"
+severity: MEDIUM
+tags: [rdp, windows, xfreerdp, lateral-movement]
+
+trigger:
+  any_of:
+    - { port: 3389 }
+    - { service_pattern: "(?i)ms-wbt-server|rdp" }
+
+description: |
+  Open Remote Desktop service on the target. With valid credentials,
+  xfreerdp gives a graphical Windows session — useful when WinRM is locked
+  down or when GUI tooling is required.
+
+steps:
+  - id: 1
+    title: "Connect with username and password"
+    command: xfreerdp /u:USUARIO /p:PASSWORD /v:$VICTIMA
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-rdp

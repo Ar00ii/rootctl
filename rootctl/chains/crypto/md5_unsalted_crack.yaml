@@ -1,0 +1,65 @@
+chain_id: md5_unsalted_crack
+title: "Crack unsalted MD5 hashes with john / hashcat"
+severity: MEDIUM
+tags: [crypto, md5, john, hashcat, cracking]
+
+trigger:
+  any_of:
+    - { kind: md5_or_ntlm }
+    - { kind_pattern: "^(raw-md5|md5)$" }
+
+description: |
+  An unsalted 32-hex digest was detected. Could be MD5 or NTLM — try both.
+  john --format=Raw-MD5 is the canonical workflow; hashcat -m 0 is faster
+  if a GPU is available.
+
+steps:
+  - id: 1
+    title: "Save the hash to a file (one per line)"
+    command: |
+      echo 'HASH_MD5_AQUI' > md5.hash
+      echo '5d41402abc4b2a76b9719d911017c592' > md5.hash
+      echo 'c3fcd3d76192e4007dfb496cca67e13b' >> md5.hash
+      cat md5.hash
+    notes: |
+      First command uses `>` (overwrite); subsequent ones use `>>` (append).
+      John processes every line in one run.
+
+  - id: 2
+    title: "Crack with john"
+    command: john --format=Raw-MD5 --wordlist=/usr/share/wordlists/rockyou.txt md5.hash
+    notes: |
+      Each cracked password prints as `password (?)`. The `(?)` appears
+      because the file has no username column.
+
+  - id: 3
+    title: "Show every cracked password"
+    command: john --show --format=Raw-MD5 md5.hash
+
+  - id: 4
+    title: "GPU alternative with hashcat"
+    command: |
+      hashcat -m 0 -a 0 md5.hash /usr/share/wordlists/rockyou.txt
+      hashcat -m 0 md5.hash --show
+
+common_errors:
+  - error: "Token length exception"
+    solution: |
+      The hash file contains extra characters. Make sure only the hex digest
+      is present, no spaces or trailing newlines.
+  - error: "0 password hashes left, use --show"
+    solution: |
+      John already cracked it in a previous run; results live in
+      ~/.john/john.pot:
+        john --show --format=Raw-MD5 md5.hash
+      Or force from scratch:
+        rm ~/.john/john.pot
+        john --format=Raw-MD5 --wordlist=/usr/share/wordlists/rockyou.txt md5.hash
+  - error: "John ends with DONE but no password is shown"
+    solution: |
+      Sometimes `john --show` is the only place it appears. If still nothing,
+      the password is not in rockyou — try with rules:
+        john --format=Raw-MD5 --wordlist=/usr/share/wordlists/rockyou.txt --rules md5.hash
+
+references:
+  - https://hashcat.net/wiki/doku.php?id=example_hashes

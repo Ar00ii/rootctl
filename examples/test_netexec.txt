@@ -1,0 +1,5 @@
+SMB         10.10.11.42    445    DC01             [*] Windows Server 2019 Build 17763 (name:DC01) (domain:HTB.LOCAL) (signing:True) (SMBv1:False)
+SMB         10.10.11.43    445    WEB01            [*] Windows Server 2019 Build 17763 (name:WEB01) (domain:HTB.LOCAL) (signing:False) (SMBv1:False)
+SMB         10.10.11.42    445    DC01             [+] HTB.LOCAL\alice:Sup3rSecret
+SMB         10.10.11.43    445    WEB01            [+] HTB.LOCAL\admin_jdoe:Welcome2024 (Pwn3d!)
+SMB         10.10.11.43    445    WEB01            [-] HTB.LOCAL\bob:wrong STATUS_LOGON_FAILURE

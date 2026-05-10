@@ -1,0 +1,6 @@
+2026/05/06 12:00:00 CMD: UID=0    PID=12345  /bin/bash /opt/scripts/backup.sh
+2026/05/06 12:00:00 CMD: UID=0    PID=12346  /usr/sbin/CRON -f
+2026/05/06 12:01:00 CMD: UID=0    PID=12347  /bin/sh -c /opt/scripts/cleanup.sh
+2026/05/06 12:01:00 CMD: UID=1000 PID=12348  /usr/bin/whoami
+2026/05/06 12:02:00 CMD: UID=0    PID=12349  /usr/local/bin/pspy64
+2026/05/06 12:05:00 CMD: UID=0    PID=12350  /opt/maintenance/healthcheck.py

